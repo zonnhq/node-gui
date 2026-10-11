@@ -136,6 +136,21 @@ window, all verified live against the backend.
   freedesktop screensaver service over D-Bus, or `xprintidle`. Where none is
   available the node does not contribute and says why.
 
+## Updates
+
+Zonn Node checks the backend for a newer version when it starts and every 6
+hours (`internal/updater`, over the node's own gRPC connection). A newer
+version shows in the window and the tray with **Download and install**: the
+installer downloads into `~/.zonn/updates` (resuming an interrupted download),
+is checked against the SHA-256 the backend published, and only then opens.
+A file that does not match is deleted. Release builds stamp their version and
+variant (`-X .../internal/version.Version=v1.2.3 -X .../internal/version.Variant=nvidia`)
+so the backend offers the matching installer.
+
+`scripts/release-manifest.py VERSION FOLDER` writes `zonn-node-release.json`
+and `SHA256SUMS` for a folder of installers; the release workflow's last job
+runs it.
+
 ## Installers
 
 Each installer bundles the self-contained inference runner, built by the

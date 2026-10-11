@@ -11,8 +11,8 @@ import {
   CartesianGrid,
   Tooltip,
 } from "recharts";
-import { enroll, fetchState, fetchConfig, saveConfig } from "./api";
-import type { Allocation, Config, State } from "./types";
+import { enroll, fetchState, fetchConfig, saveConfig, updateAction } from "./api";
+import type { Allocation, Config, State, UpdateState } from "./types";
 
 type Tab = "overview" | "analytics" | "settings" | "activity";
 
@@ -71,10 +71,15 @@ export default function App() {
       <main className="mx-auto max-w-5xl px-6 py-6">
         {!reachable && <Banner text="Cannot reach the local node service on port 9090. Is the node running?" />}
         {reachable && !state && <Banner text="Starting up..." />}
-        {state && state.connection === "UPDATE_REQUIRED" && (
-          <div className="mb-4">
-            <Banner text={state.notice || "This Zone needs a newer Zonn Node. Install the latest version."} />
-          </div>
+        {state && state.update?.available ? (
+          <UpdatePanel update={state.update} />
+        ) : (
+          state &&
+          state.connection === "UPDATE_REQUIRED" && (
+            <div className="mb-4">
+              <Banner text={state.notice || "This Zone needs a newer Zonn Node. Install the latest version."} />
+            </div>
+          )
         )}
         {state && state.waiting_for_idle && (
           <div className="mb-4">
@@ -1091,6 +1096,55 @@ function EnrollPanel({ state }: { state: State }) {
           </button>
         </form>
       </Card>
+    </div>
+  );
+}
+
+// UpdatePanel offers a newer Zonn Node: one button downloads it from the
+// backend, checks its SHA-256, and opens the installer.
+function UpdatePanel({ update }: { update: UpdateState }) {
+  const [error, setError] = useState("");
+  const mb = (n: number) => (n / (1 << 20)).toFixed(n < 100 << 20 ? 1 : 0);
+  const install = async () => {
+    setError("");
+    try {
+      await updateAction("install");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not start the update.");
+    }
+  };
+  const pct = update.size > 0 ? Math.min(100, Math.round((update.done / update.size) * 100)) : 0;
+  return (
+    <div className="mb-4 rounded-md border border-colony-mist bg-colony-paleblue px-4 py-3 text-sm text-colony-midnight">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="font-medium">
+            Zonn Node {update.version} is available{update.required ? ", and this Zone requires it" : ""}
+          </div>
+          <div className="mt-0.5 text-xs text-colony-slate">
+            {update.status === "downloading"
+              ? `Downloading: ${mb(update.done)} of ${mb(update.size)} MB (${pct}%)`
+              : update.status === "opened"
+                ? "Checked against its SHA-256 and opened. Finish the installer, then open Zonn Node again."
+                : `${mb(update.size)} MB, downloaded from your Zone's backend and checked against its SHA-256 before it opens.`}
+          </div>
+          {(update.error || error) && <div className="mt-1 text-xs text-colony-indigo">{update.error || error}</div>}
+        </div>
+        {update.status !== "downloading" && update.status !== "opened" && (
+          <button
+            type="button"
+            onClick={install}
+            className="rounded bg-colony-core px-3 py-1.5 text-sm font-medium text-colony-cloud hover:bg-colony-deep"
+          >
+            {update.status === "error" ? "Try again" : "Download and install"}
+          </button>
+        )}
+      </div>
+      {update.status === "downloading" && (
+        <div className="mt-2 h-1.5 w-full overflow-hidden rounded bg-colony-mist">
+          <div className="h-full bg-colony-core" style={{ width: `${pct}%` }} />
+        </div>
+      )}
     </div>
   );
 }

@@ -99,6 +99,8 @@ type State struct {
 	// Desktop is true when the desktop app runs the node, so settings only it
 	// acts on (start on sign in) can be offered.
 	Desktop bool `json:"desktop"`
+	// Update is a newer Zonn Node, when one is published.
+	Update UpdateState `json:"update"`
 }
 
 // Daemon holds the mutable state behind a mutex.
@@ -131,6 +133,7 @@ type Daemon struct {
 	idleNote    string
 	desktop     bool
 	onConfig    []func(config.Config)
+	update      UpdateState
 
 	reconnect chan struct{}
 }
@@ -311,6 +314,7 @@ func (d *Daemon) Snapshot() State {
 		WaitingForIdle: d.cfg.Available && d.idleBlocked,
 		IdleNote:       d.idleNote,
 		Desktop:        d.desktop,
+		Update:         d.update,
 	}
 }
 
@@ -421,6 +425,7 @@ func (d *Daemon) Run(ctx context.Context) {
 	go d.probeAccelerator(ctx)
 	d.checkIdle()
 	go d.watchIdle(ctx)
+	go d.watchUpdates(ctx)
 	backoff := minBackoff
 	for {
 		if ctx.Err() != nil {
@@ -610,6 +615,8 @@ func (d *Daemon) connectOnce(ctx context.Context) bool {
 			d.notice = msg
 			d.mu.Unlock()
 			d.setConnection(UpdateRequired)
+			// Look for the update now, so the window can offer it.
+			go d.CheckUpdate(ctx)
 		default:
 			d.log("ERROR", "Registration failed: "+err.Error())
 			d.setConnection(Disconnected)

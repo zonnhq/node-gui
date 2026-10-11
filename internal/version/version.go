@@ -6,3 +6,8 @@ package version
 
 // Version is the build's version.
 var Version = "dev"
+
+// Variant is the build's runner variant, "cpu" or "nvidia", set by release
+// builds with -ldflags "-X github.com/zonnhq/node-gui/internal/version.Variant=nvidia".
+// Empty means cpu.
+var Variant = ""

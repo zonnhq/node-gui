@@ -19,11 +19,13 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	NodeService_Enroll_FullMethodName      = "/colony.v1.NodeService/Enroll"
-	NodeService_Register_FullMethodName    = "/colony.v1.NodeService/Register"
-	NodeService_Heartbeat_FullMethodName   = "/colony.v1.NodeService/Heartbeat"
-	NodeService_ReportError_FullMethodName = "/colony.v1.NodeService/ReportError"
-	NodeService_SetOffline_FullMethodName  = "/colony.v1.NodeService/SetOffline"
+	NodeService_Enroll_FullMethodName         = "/colony.v1.NodeService/Enroll"
+	NodeService_Register_FullMethodName       = "/colony.v1.NodeService/Register"
+	NodeService_Heartbeat_FullMethodName      = "/colony.v1.NodeService/Heartbeat"
+	NodeService_ReportError_FullMethodName    = "/colony.v1.NodeService/ReportError"
+	NodeService_SetOffline_FullMethodName     = "/colony.v1.NodeService/SetOffline"
+	NodeService_CheckUpdate_FullMethodName    = "/colony.v1.NodeService/CheckUpdate"
+	NodeService_DownloadUpdate_FullMethodName = "/colony.v1.NodeService/DownloadUpdate"
 )
 
 // NodeServiceClient is the client API for NodeService service.
@@ -50,6 +52,15 @@ type NodeServiceClient interface {
 	// (the operator paused contribution), so the fleet reflects it at once instead
 	// of waiting for the reaper to notice the missing heartbeats.
 	SetOffline(ctx context.Context, in *SetOfflineRequest, opts ...grpc.CallOption) (*SetOfflineResponse, error)
+	// CheckUpdate tells a node whether a newer Zonn Node is published for its
+	// operating system, architecture, and variant, and whether this backend
+	// requires it. It works for versions the minimum version gate refuses, so
+	// an outdated node can still fetch its update.
+	CheckUpdate(ctx context.Context, in *CheckUpdateRequest, opts ...grpc.CallOption) (*CheckUpdateResponse, error)
+	// DownloadUpdate streams a published installer from offset (to resume an
+	// interrupted download). The node checks it against the SHA-256 from
+	// CheckUpdate before opening it.
+	DownloadUpdate(ctx context.Context, in *DownloadUpdateRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[UpdateChunk], error)
 }
 
 type nodeServiceClient struct {
@@ -113,6 +124,35 @@ func (c *nodeServiceClient) SetOffline(ctx context.Context, in *SetOfflineReques
 	return out, nil
 }
 
+func (c *nodeServiceClient) CheckUpdate(ctx context.Context, in *CheckUpdateRequest, opts ...grpc.CallOption) (*CheckUpdateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CheckUpdateResponse)
+	err := c.cc.Invoke(ctx, NodeService_CheckUpdate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *nodeServiceClient) DownloadUpdate(ctx context.Context, in *DownloadUpdateRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[UpdateChunk], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &NodeService_ServiceDesc.Streams[1], NodeService_DownloadUpdate_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[DownloadUpdateRequest, UpdateChunk]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type NodeService_DownloadUpdateClient = grpc.ServerStreamingClient[UpdateChunk]
+
 // NodeServiceServer is the server API for NodeService service.
 // All implementations must embed UnimplementedNodeServiceServer
 // for forward compatibility.
@@ -137,6 +177,15 @@ type NodeServiceServer interface {
 	// (the operator paused contribution), so the fleet reflects it at once instead
 	// of waiting for the reaper to notice the missing heartbeats.
 	SetOffline(context.Context, *SetOfflineRequest) (*SetOfflineResponse, error)
+	// CheckUpdate tells a node whether a newer Zonn Node is published for its
+	// operating system, architecture, and variant, and whether this backend
+	// requires it. It works for versions the minimum version gate refuses, so
+	// an outdated node can still fetch its update.
+	CheckUpdate(context.Context, *CheckUpdateRequest) (*CheckUpdateResponse, error)
+	// DownloadUpdate streams a published installer from offset (to resume an
+	// interrupted download). The node checks it against the SHA-256 from
+	// CheckUpdate before opening it.
+	DownloadUpdate(*DownloadUpdateRequest, grpc.ServerStreamingServer[UpdateChunk]) error
 	mustEmbedUnimplementedNodeServiceServer()
 }
 
@@ -161,6 +210,12 @@ func (UnimplementedNodeServiceServer) ReportError(context.Context, *ReportErrorR
 }
 func (UnimplementedNodeServiceServer) SetOffline(context.Context, *SetOfflineRequest) (*SetOfflineResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SetOffline not implemented")
+}
+func (UnimplementedNodeServiceServer) CheckUpdate(context.Context, *CheckUpdateRequest) (*CheckUpdateResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CheckUpdate not implemented")
+}
+func (UnimplementedNodeServiceServer) DownloadUpdate(*DownloadUpdateRequest, grpc.ServerStreamingServer[UpdateChunk]) error {
+	return status.Errorf(codes.Unimplemented, "method DownloadUpdate not implemented")
 }
 func (UnimplementedNodeServiceServer) mustEmbedUnimplementedNodeServiceServer() {}
 func (UnimplementedNodeServiceServer) testEmbeddedByValue()                     {}
@@ -262,6 +317,35 @@ func _NodeService_SetOffline_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _NodeService_CheckUpdate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CheckUpdateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(NodeServiceServer).CheckUpdate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: NodeService_CheckUpdate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(NodeServiceServer).CheckUpdate(ctx, req.(*CheckUpdateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _NodeService_DownloadUpdate_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(DownloadUpdateRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(NodeServiceServer).DownloadUpdate(m, &grpc.GenericServerStream[DownloadUpdateRequest, UpdateChunk]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type NodeService_DownloadUpdateServer = grpc.ServerStreamingServer[UpdateChunk]
+
 // NodeService_ServiceDesc is the grpc.ServiceDesc for NodeService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -285,6 +369,10 @@ var NodeService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "SetOffline",
 			Handler:    _NodeService_SetOffline_Handler,
 		},
+		{
+			MethodName: "CheckUpdate",
+			Handler:    _NodeService_CheckUpdate_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
@@ -292,6 +380,11 @@ var NodeService_ServiceDesc = grpc.ServiceDesc{
 			Handler:       _NodeService_Heartbeat_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
+		},
+		{
+			StreamName:    "DownloadUpdate",
+			Handler:       _NodeService_DownloadUpdate_Handler,
+			ServerStreams: true,
 		},
 	},
 	Metadata: "node.proto",

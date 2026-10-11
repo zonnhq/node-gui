@@ -47,6 +47,8 @@ func (a *App) onTrayReady() {
 	systray.AddSeparator()
 	open := systray.AddMenuItem("Open Zonn Node", "Show the window")
 	pause := systray.AddMenuItem("Pause contributing", "Stop or resume contributing this machine")
+	update := systray.AddMenuItem("Install update", "Download, check, and open the newer Zonn Node")
+	update.Hide()
 	systray.AddSeparator()
 	quit := systray.AddMenuItem("Quit Zonn Node", "Stop contributing and close the app")
 
@@ -59,6 +61,18 @@ func (a *App) onTrayReady() {
 		} else {
 			pause.SetTitle("Resume contributing")
 		}
+		switch {
+		case !st.Update.Available || st.Update.Status == "opened":
+			update.Hide()
+		case st.Update.Status == "downloading":
+			update.SetTitle("Downloading Zonn Node " + st.Update.Version)
+			update.Disable()
+			update.Show()
+		default:
+			update.SetTitle("Install Zonn Node " + st.Update.Version)
+			update.Enable()
+			update.Show()
+		}
 	}
 	refresh()
 	ticker := time.NewTicker(2 * time.Second)
@@ -70,6 +84,11 @@ func (a *App) onTrayReady() {
 				a.showWindow()
 			case <-pause.ClickedCh:
 				a.togglePause()
+				refresh()
+			case <-update.ClickedCh:
+				if err := a.daemon.InstallUpdate(); err == nil {
+					a.showWindow() // the window shows the download's progress
+				}
 				refresh()
 			case <-quit.ClickedCh:
 				systray.Quit()

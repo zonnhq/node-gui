@@ -66,6 +66,18 @@ export interface State {
   idle_note: string;
   // desktop is true when the desktop app runs the node (start at sign in).
   desktop: boolean;
+  update: UpdateState;
+}
+
+// UpdateState is a newer Zonn Node published on the backend.
+export interface UpdateState {
+  available: boolean;
+  required: boolean;
+  version: string;
+  size: number;
+  status: "" | "downloading" | "opened" | "error";
+  done: number;
+  error?: string;
 }
 
 export interface Config {

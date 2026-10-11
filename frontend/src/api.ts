@@ -47,3 +47,15 @@ export async function reportIssue(level: string, message: string): Promise<void>
   });
   if (!res.ok) throw new Error(`report failed: ${res.status}`);
 }
+
+// updateAction asks the daemon to check for a newer Zonn Node now ("check"), or
+// to download, verify, and open its installer ("install").
+export async function updateAction(action: "check" | "install"): Promise<void> {
+  const res = await fetch(`${BASE}/api/update`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `update failed: ${res.status}`);
+}

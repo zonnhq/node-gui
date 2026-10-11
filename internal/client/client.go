@@ -6,6 +6,8 @@ package client
 import (
 	"context"
 	"crypto/tls"
+	"errors"
+	"io"
 	"net"
 	"strings"
 	"time"
@@ -222,4 +224,48 @@ func (c *Client) SetOffline(ctx context.Context, nodeID, reason string) error {
 		Reason: reason,
 	})
 	return err
+}
+
+// UpdateOffer is the backend's answer about a newer Zonn Node.
+type UpdateOffer struct {
+	Available bool
+	Required  bool // the backend refuses the running version
+	Version   string
+	FileName  string
+	Size      int64
+	SHA256    string
+}
+
+// CheckUpdate asks whether a newer Zonn Node is published for this platform.
+func (c *Client) CheckUpdate(ctx context.Context, nodeID, goos, arch, variant, format, appVersion string) (UpdateOffer, error) {
+	resp, err := c.svc.CheckUpdate(ctx, &colonyv1.CheckUpdateRequest{
+		NodeId: nodeID, Os: goos, Arch: arch, Variant: variant, Format: format, AppVersion: appVersion,
+	})
+	if err != nil {
+		return UpdateOffer{}, err
+	}
+	return UpdateOffer{
+		Available: resp.GetAvailable(), Required: resp.GetRequired(), Version: resp.GetVersion(),
+		FileName: resp.GetFileName(), Size: resp.GetSize(), SHA256: resp.GetSha256(),
+	}, nil
+}
+
+// DownloadUpdate streams an installer from offset into w.
+func (c *Client) DownloadUpdate(ctx context.Context, nodeID, fileName string, offset int64, w io.Writer) error {
+	stream, err := c.svc.DownloadUpdate(ctx, &colonyv1.DownloadUpdateRequest{NodeId: nodeID, FileName: fileName, Offset: offset})
+	if err != nil {
+		return err
+	}
+	for {
+		chunk, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if _, err := w.Write(chunk.GetData()); err != nil {
+			return err
+		}
+	}
 }

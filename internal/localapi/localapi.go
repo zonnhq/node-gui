@@ -48,6 +48,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/config", s.handleConfig)
 	mux.HandleFunc("/api/report", s.handleReport)
 	mux.HandleFunc("/api/enroll", s.handleEnroll)
+	mux.HandleFunc("/api/update", s.handleUpdate)
 	return localOnly(mux)
 }
 
@@ -75,6 +76,38 @@ func (s *Server) handleEnroll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.daemon.Snapshot())
+}
+
+// handleUpdate acts on a newer Zonn Node: "check" asks the backend now, and
+// "install" downloads the installer, checks its SHA-256, and opens it.
+func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Action string `json:"action"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	switch req.Action {
+	case "check":
+		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+		defer cancel()
+		s.daemon.CheckUpdate(ctx)
+	case "install":
+		if err := s.daemon.InstallUpdate(); err != nil {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+			return
+		}
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "action must be check or install"})
+		return
+	}
+	writeJSON(w, http.StatusOK, s.daemon.Snapshot().Update)
 }
 
 // ListenAndServe starts the server and blocks.

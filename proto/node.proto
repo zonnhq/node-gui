@@ -28,6 +28,17 @@ service NodeService {
   // (the operator paused contribution), so the fleet reflects it at once instead
   // of waiting for the reaper to notice the missing heartbeats.
   rpc SetOffline(SetOfflineRequest) returns (SetOfflineResponse);
+
+  // CheckUpdate tells a node whether a newer Zonn Node is published for its
+  // operating system, architecture, and variant, and whether this backend
+  // requires it. It works for versions the minimum version gate refuses, so
+  // an outdated node can still fetch its update.
+  rpc CheckUpdate(CheckUpdateRequest) returns (CheckUpdateResponse);
+
+  // DownloadUpdate streams a published installer from offset (to resume an
+  // interrupted download). The node checks it against the SHA-256 from
+  // CheckUpdate before opening it.
+  rpc DownloadUpdate(DownloadUpdateRequest) returns (stream UpdateChunk);
 }
 
 // Total physical resources on a machine.
@@ -148,4 +159,32 @@ message SetOfflineRequest {
 
 message SetOfflineResponse {
   bool ok = 1;
+}
+
+message CheckUpdateRequest {
+  string node_id = 1;
+  string os = 2;      // linux, windows, darwin
+  string arch = 3;    // amd64, arm64
+  string variant = 4; // cpu or nvidia
+  string format = 5;  // deb, exe, dmg
+  string app_version = 6;
+}
+
+message CheckUpdateResponse {
+  bool available = 1; // a newer installer is published for this node
+  string version = 2;
+  string file_name = 3;
+  int64 size = 4;
+  string sha256 = 5; // hex
+  bool required = 6; // this backend refuses the node's current version
+}
+
+message DownloadUpdateRequest {
+  string node_id = 1;
+  string file_name = 2;
+  int64 offset = 3;
+}
+
+message UpdateChunk {
+  bytes data = 1;
 }

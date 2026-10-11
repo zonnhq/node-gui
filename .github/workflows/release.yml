@@ -9,8 +9,18 @@ name: Release
 #   macOS     Zonn-Node-VERSION-macOS-apple-silicon.dmg and -intel.dmg
 #
 # Installers are uploaded as workflow artifacts for checking on clean
-# machines. Publishing them (to the Console's Downloads folder on the server,
-# or a GitHub release) is a separate, deliberate step.
+# machines. The last job collects all of them into one artifact,
+# zonn-node-release-VERSION, with zonn-node-release.json (versions, sizes,
+# SHA-256) and SHA256SUMS. Publishing is a separate, deliberate step: copy
+# that artifact's files into the server's deploy/downloads folder, and the
+# backend offers them to nodes as updates.
+#
+# Code signing: macOS apps are ad hoc signed (free). Developer ID signing and
+# notarization, and Windows Authenticode, run only when their secrets exist
+# (MACOS_SIGNING_IDENTITY with MACOS_CERTIFICATE_P12, MACOS_CERTIFICATE_PASSWORD,
+# APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD; WINDOWS_CERTIFICATE_PFX and
+# WINDOWS_CERTIFICATE_PASSWORD). None are set yet; see the install guide for
+# what testers see meanwhile.
 
 on:
   workflow_dispatch:
@@ -41,6 +51,15 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       VERSION: ${{ inputs.version }}
+      # Signing secrets; empty until certificates exist, which skips the steps.
+      MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+      WINDOWS_CERTIFICATE_PFX: ${{ secrets.WINDOWS_CERTIFICATE_PFX }}
+      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -75,7 +94,7 @@ jobs:
           go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
           node -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync("wails.json")); p.info.productVersion=process.env.VERSION; fs.writeFileSync("wails.json", JSON.stringify(p, null, 2)+"\n")'
           wails build -clean -trimpath -tags "desktop,webkit2_41" \
-            -ldflags "-X github.com/zonnhq/node-gui/internal/version.Version=v${VERSION}" \
+            -ldflags "-X github.com/zonnhq/node-gui/internal/version.Version=v${VERSION} -X github.com/zonnhq/node-gui/internal/version.Variant=${{ matrix.variant }}" \
             -skipbindings -platform "${{ matrix.platform }}" -webview2 embed -o zonn-node
 
       - name: Ubuntu package
@@ -85,12 +104,32 @@ jobs:
           build/linux/build-deb.sh "$VERSION" ${{ matrix.variant }}
           dpkg-deb --info build/installer/*.deb
 
+      - name: macOS signing certificate (only when the secrets exist)
+        if: runner.os == 'macOS' && env.MACOS_CERTIFICATE_P12 != ''
+        shell: bash
+        run: |
+          echo "$MACOS_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p ci "$RUNNER_TEMP/sign.keychain"
+          security default-keychain -s "$RUNNER_TEMP/sign.keychain"
+          security unlock-keychain -p ci "$RUNNER_TEMP/sign.keychain"
+          security import "$RUNNER_TEMP/cert.p12" -k "$RUNNER_TEMP/sign.keychain" -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci "$RUNNER_TEMP/sign.keychain"
+
       - name: macOS disk image
         if: runner.os == 'macOS'
         shell: bash
         run: |
           build/darwin/build-dmg.sh "$VERSION" ${{ matrix.dmg }}
           hdiutil verify build/installer/*.dmg
+
+      - name: macOS notarization (only when the secrets exist)
+        if: runner.os == 'macOS' && env.APPLE_ID != ''
+        shell: bash
+        run: |
+          for dmg in build/installer/*.dmg; do
+            xcrun notarytool submit "$dmg" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+            xcrun stapler staple "$dmg"
+          done
 
       - name: Windows Setup
         if: runner.os == 'Windows'
@@ -108,8 +147,38 @@ jobs:
             "build/windows/zonn-node.iss"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Windows Authenticode signing (only when the secrets exist)
+        if: runner.os == 'Windows' && env.WINDOWS_CERTIFICATE_PFX != ''
+        shell: pwsh
+        run: |
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\cert.pfx", [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_PFX))
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Select-Object -Last 1
+          foreach ($exe in Get-ChildItem "build/installer/*.exe") {
+            & $signtool.FullName sign /f "$env:RUNNER_TEMP\cert.pfx" /p $env:WINDOWS_CERTIFICATE_PASSWORD /fd sha256 /tr http://timestamp.digicert.com /td sha256 $exe.FullName
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
       - uses: actions/upload-artifact@v4
         with:
           name: zonn-node-${{ matrix.label }}-${{ matrix.variant }}-${{ inputs.version }}
           path: build/installer/*
+          if-no-files-found: error
+
+  release:
+    name: Release manifest and checksums
+    needs: installers
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: zonn-node-*-${{ inputs.version }}
+          path: release
+          merge-multiple: true
+      - name: Write zonn-node-release.json and SHA256SUMS
+        run: python3 scripts/release-manifest.py "${{ inputs.version }}" release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zonn-node-release-${{ inputs.version }}
+          path: release/*
           if-no-files-found: error
