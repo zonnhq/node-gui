@@ -37,6 +37,9 @@ WizardStyle=modern
 UninstallDisplayName=Zonn Node
 SetupIconFile={#IconFile}
 UninstallDisplayIcon={app}\{#AppExeName}
+; Close a running Zonn Node (it stays in the tray) before replacing its files.
+CloseApplications=force
+RestartApplications=no
 ; Leftovers from the other variant, so switching between them stays clean.
 [InstallDelete]
 Type: files; Name: "{app}\inference-worker.exe"
@@ -60,3 +63,12 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 
 [Run]
 Filename: "{app}\{#AppExeName}"; Description: "Launch Zonn Node"; Flags: nowait postinstall skipifsilent
+
+; Zonn Node keeps running in the tray after its window closes. Starting at
+; sign in is a value the app writes under the current user's Run key; the
+; uninstaller removes it, and stops a running Zonn Node first.
+[Registry]
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: none; ValueName: "Zonn Node"; Flags: uninsdeletevalue dontcreatekey
+
+[UninstallRun]
+Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM {#AppExeName}"; Flags: runhidden; RunOnceId: "StopZonnNode"

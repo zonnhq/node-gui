@@ -9,7 +9,11 @@ package main
 import (
 	"context"
 	"log"
+	"os"
 
+	"github.com/wailsapp/wails/v2/pkg/runtime"
+
+	"github.com/zonnhq/node-gui/internal/autostart"
 	"github.com/zonnhq/node-gui/internal/config"
 	"github.com/zonnhq/node-gui/internal/daemon"
 	"github.com/zonnhq/node-gui/internal/localapi"
@@ -36,6 +40,11 @@ func (a *App) startup(ctx context.Context) {
 	}
 
 	a.daemon = daemon.New(cfg)
+	a.daemon.SetDesktop(true)
+	// Start at sign in follows the setting, and is rewritten at every start
+	// so it always points at the installed executable.
+	a.applyAutoStart(cfg)
+	a.daemon.OnConfigChange(a.applyAutoStart)
 
 	api := localapi.New(a.daemon, localapi.DefaultAddr)
 	go func() {
@@ -45,6 +54,74 @@ func (a *App) startup(ctx context.Context) {
 	}()
 
 	go a.daemon.Run(ctx)
+	a.startTray()
+}
+
+// applyAutoStart makes starting at sign in match the setting.
+func (a *App) applyAutoStart(cfg config.Config) {
+	exe, err := os.Executable()
+	if err != nil {
+		log.Printf("autostart: %v", err)
+		return
+	}
+	if err := autostart.Set(cfg.AutoStart, exe); err != nil {
+		log.Printf("autostart: %v", err)
+		a.daemon.PushError("WARN", "Could not change starting at sign in: "+err.Error())
+	}
+}
+
+// showWindow brings the window back from the background.
+func (a *App) showWindow() {
+	if a.ctx == nil {
+		return
+	}
+	runtime.WindowUnminimise(a.ctx)
+	runtime.Show(a.ctx)
+	runtime.WindowShow(a.ctx)
+}
+
+// hideWindow sends the window to the background; the node keeps running.
+func (a *App) hideWindow() {
+	if a.ctx != nil {
+		runtime.WindowHide(a.ctx)
+	}
+}
+
+// togglePause flips the contributor's Available switch, as the Settings
+// switch does.
+func (a *App) togglePause() {
+	cfg := a.daemon.Config()
+	cfg.Available = !cfg.Available
+	if err := a.daemon.UpdateConfig(cfg); err != nil {
+		log.Printf("pause: %v", err)
+	}
+}
+
+// quit stops the node and the app.
+func (a *App) quit() {
+	if a.ctx != nil {
+		runtime.Quit(a.ctx)
+	}
+}
+
+// statusLine says in a few words what the node is doing, for the tray.
+func statusLine(st daemon.State) string {
+	switch {
+	case !st.Available:
+		return "Paused"
+	case st.WaitingForIdle:
+		return "Waiting until you are away"
+	case !st.Enrolled:
+		return "Not enrolled"
+	case st.Connection == daemon.Connected && st.ColonyUsage.Active:
+		return "Computing for a Zone"
+	case st.Connection == daemon.Connected:
+		return "Contributing, ready for work"
+	case st.Connection == daemon.UpdateRequired:
+		return "Update required"
+	default:
+		return "Connecting"
+	}
 }
 
 // The methods below are bound into the frontend by Wails. The frontend mainly

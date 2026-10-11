@@ -109,11 +109,32 @@ publishes a GitHub release automatically.
 
 ## Status
 
-Phase 1 complete for the engine: hardware detection (including GPU), config with a
-stable node id, registration, heartbeat streaming, reconnect with backoff, and the
-local dashboard API, all verified live against the Coordinator. The Wails window
-and system tray build on a machine with a webview. The rich analytics dashboard
-(gauges, ranking, richer logs) is Phase 2.
+Hardware detection (including GPU), enrollment, registration, heartbeat
+streaming, reconnect with backoff, the local dashboard API, and the desktop
+window, all verified live against the backend.
+
+## Running in the background
+
+- **Closing the window keeps contributing.** The app stays running; reopen it
+  from the tray icon (Windows, and Linux desktops with a StatusNotifier tray,
+  such as Ubuntu's GNOME, KDE, and most others) or by launching Zonn Node again,
+  which opens the running app instead of starting a second one. The tray menu
+  shows what the node is doing and has Open, Pause or Resume, and Quit. On
+  macOS the Zonn Node menu in the menu bar (click the Dock icon) has the same
+  actions; a menu bar icon of its own waits for Wails v3.
+- **Start when you sign in** (Settings) adds a Windows Run entry under the
+  current user, a macOS LaunchAgent (`~/Library/LaunchAgents/com.zonnhq.node.plist`),
+  or an XDG autostart entry (`~/.config/autostart/zonn-node.desktop`), starting
+  the app hidden (`--hidden`). Turning it off removes the entry; the Windows
+  uninstaller removes it too, and the Linux entry is skipped once the app is
+  uninstalled.
+- **Only when idle** (Settings) contributes only after nobody has used the
+  keyboard or mouse for a chosen number of minutes, and pauses within about 5
+  seconds of the owner coming back; a Zone using the machine rebuilds its work
+  on its other machines. The idle time comes from `GetLastInputInfo` on
+  Windows, `ioreg` on macOS, and on Linux GNOME's idle monitor or the
+  freedesktop screensaver service over D-Bus, or `xprintidle`. Where none is
+  available the node does not contribute and says why.
 
 ## Installers
 

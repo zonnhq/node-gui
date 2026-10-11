@@ -19,6 +19,7 @@ import (
 
 	"github.com/zonnhq/node-gui/internal/client"
 	"github.com/zonnhq/node-gui/internal/config"
+	"github.com/zonnhq/node-gui/internal/idle"
 	"github.com/zonnhq/node-gui/internal/resources"
 	"github.com/zonnhq/node-gui/internal/version"
 	"github.com/zonnhq/node-gui/internal/worker"
@@ -91,6 +92,13 @@ type State struct {
 	// update being required.
 	Notice     string `json:"notice"`
 	AppVersion string `json:"app_version"`
+	// WaitingForIdle is true while Only when idle holds the node back, with
+	// IdleNote saying why.
+	WaitingForIdle bool   `json:"waiting_for_idle"`
+	IdleNote       string `json:"idle_note"`
+	// Desktop is true when the desktop app runs the node, so settings only it
+	// acts on (start on sign in) can be offered.
+	Desktop bool `json:"desktop"`
 }
 
 // Daemon holds the mutable state behind a mutex.
@@ -116,7 +124,84 @@ type Daemon struct {
 	// learned once by probing it in the background; empty means CPU only.
 	accelerator string
 
+	// idleSource reads the owner's idle time; idleBlocked is set while Only
+	// when idle holds the node back, with idleNote saying why.
+	idleSource  idle.Source
+	idleBlocked bool
+	idleNote    string
+	desktop     bool
+	onConfig    []func(config.Config)
+
 	reconnect chan struct{}
+}
+
+// idleCheckInterval is how often Only when idle looks at the idle time. The
+// owner coming back is noticed within this long.
+const idleCheckInterval = 5 * time.Second
+
+// SetDesktop marks the daemon as run by the desktop app.
+func (d *Daemon) SetDesktop(on bool) {
+	d.mu.Lock()
+	d.desktop = on
+	d.mu.Unlock()
+}
+
+// SetIdleSource replaces how the owner's idle time is read (for tests).
+func (d *Daemon) SetIdleSource(s idle.Source) {
+	d.mu.Lock()
+	d.idleSource = s
+	d.mu.Unlock()
+}
+
+// OnConfigChange registers a callback run after every saved settings change.
+func (d *Daemon) OnConfigChange(fn func(config.Config)) {
+	d.mu.Lock()
+	d.onConfig = append(d.onConfig, fn)
+	d.mu.Unlock()
+}
+
+// checkIdle applies Only when idle: it decides from the owner's idle time
+// whether the node may contribute and, when that changes, wakes the run loop
+// so the node pauses or resumes. It returns the decision.
+func (d *Daemon) checkIdle() idle.Decision {
+	d.mu.RLock()
+	only, minutes, src := d.cfg.OnlyWhenIdle, d.cfg.IdleMinutes, d.idleSource
+	d.mu.RUnlock()
+	var away time.Duration
+	var err error
+	if only {
+		away, err = src.Idle()
+	}
+	decision := idle.Decide(only, time.Duration(minutes)*time.Minute, away, err)
+	d.mu.Lock()
+	changed := d.idleBlocked == decision.Allowed
+	d.idleBlocked = !decision.Allowed
+	d.idleNote = decision.Note
+	d.mu.Unlock()
+	if changed {
+		if decision.Allowed {
+			d.log("INFO", "You have been away long enough; contributing again (Only when idle)")
+		} else {
+			d.log("INFO", decision.Note)
+		}
+		d.triggerReconnect()
+	}
+	return decision
+}
+
+// watchIdle runs checkIdle on a clock until ctx ends.
+func (d *Daemon) watchIdle(ctx context.Context) {
+	defer d.recoverCrash("watchIdle")
+	ticker := time.NewTicker(idleCheckInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			d.checkIdle()
+		}
+	}
 }
 
 // runningWorker is one stage worker this node is running for a Zone.
@@ -147,6 +232,7 @@ func New(cfg config.Config) *Daemon {
 		connection:  Disconnected,
 		reconnect:   make(chan struct{}, 1),
 		workers:     make(map[string]*runningWorker),
+		idleSource:  idle.System(),
 	}
 	if creds, ok := config.LoadCredentials(); ok {
 		d.creds = &creds
@@ -217,11 +303,14 @@ func (d *Daemon) Snapshot() State {
 			RAMGB:    d.zoneUsageLocked().RAMGB,
 			Active:   len(d.workers) > 0,
 		},
-		Ranking:    d.ranking,
-		Events:     events,
-		Enrolled:   d.enrolledLocked(),
-		Notice:     d.notice,
-		AppVersion: version.Version,
+		Ranking:        d.ranking,
+		Events:         events,
+		Enrolled:       d.enrolledLocked(),
+		Notice:         d.notice,
+		AppVersion:     version.Version,
+		WaitingForIdle: d.cfg.Available && d.idleBlocked,
+		IdleNote:       d.idleNote,
+		Desktop:        d.desktop,
 	}
 }
 
@@ -293,22 +382,34 @@ func (d *Daemon) UpdateConfig(newCfg config.Config) error {
 	if newCfg.CoordinatorURL == "" {
 		newCfg.CoordinatorURL = d.cfg.CoordinatorURL
 	}
+	if newCfg.IdleMinutes <= 0 {
+		newCfg.IdleMinutes = config.DefaultIdleMinutes
+	}
+	if newCfg.IdleMinutes > config.MaxIdleMinutes {
+		newCfg.IdleMinutes = config.MaxIdleMinutes
+	}
 	d.cfg = newCfg
+	hooks := append([]func(config.Config){}, d.onConfig...)
 	d.mu.Unlock()
 
 	if err := config.Save(newCfg); err != nil {
 		return err
 	}
 	d.log("INFO", "Settings updated, applying the changes")
+	d.checkIdle()
+	for _, fn := range hooks {
+		fn(newCfg)
+	}
 	d.triggerReconnect()
 	return nil
 }
 
-// available reports whether the operator currently wants the node contributing.
+// available reports whether the node should contribute now: its owner has it
+// switched on and, with Only when idle, has been away long enough.
 func (d *Daemon) available() bool {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	return d.cfg.Available
+	return d.cfg.Available && !d.idleBlocked
 }
 
 // Run drives the connect, register, and heartbeat lifecycle until ctx is done.
@@ -318,6 +419,8 @@ func (d *Daemon) available() bool {
 func (d *Daemon) Run(ctx context.Context) {
 	defer d.recoverCrash("Run")
 	go d.probeAccelerator(ctx)
+	d.checkIdle()
+	go d.watchIdle(ctx)
 	backoff := minBackoff
 	for {
 		if ctx.Err() != nil {
@@ -414,7 +517,13 @@ func (d *Daemon) notifyOffline() {
 	defer cli.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), registerTTL)
 	defer cancel()
-	if err := cli.SetOffline(ctx, nodeID, "paused by operator"); err != nil {
+	reason := "paused by operator"
+	d.mu.RLock()
+	if d.cfg.Available && d.idleBlocked {
+		reason = "its owner is using it"
+	}
+	d.mu.RUnlock()
+	if err := cli.SetOffline(ctx, nodeID, reason); err != nil {
 		d.log("WARN", "Could not tell the Coordinator about the pause: "+err.Error())
 	}
 }
@@ -426,7 +535,11 @@ func (d *Daemon) park(ctx context.Context) {
 	d.stopWorkers()
 	d.notifyOffline()
 	d.setConnection(Paused)
-	d.log("INFO", "Paused: this machine is not available to the Zone")
+	if d.Config().Available {
+		d.log("INFO", "Paused while you use this machine (Only when idle)")
+	} else {
+		d.log("INFO", "Paused: this machine is not available to the Zone")
+	}
 	for {
 		select {
 		case <-ctx.Done():

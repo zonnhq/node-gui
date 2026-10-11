@@ -61,6 +61,11 @@ export interface State {
   // notice explains something the contributor has to act on, such as an update.
   notice: string;
   app_version: string;
+  // waiting_for_idle is true while Only when idle holds the node back.
+  waiting_for_idle: boolean;
+  idle_note: string;
+  // desktop is true when the desktop app runs the node (start at sign in).
+  desktop: boolean;
 }
 
 export interface Config {
@@ -71,6 +76,7 @@ export interface Config {
   available: boolean;
   configured: boolean;
   only_when_idle: boolean;
+  idle_minutes: number;
   auto_start: boolean;
   crash_reports_enabled: boolean;
   share_community: boolean;

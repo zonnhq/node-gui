@@ -3,6 +3,8 @@ build/*
 !build/appicon.png
 !build/zonn-node.ico
 !build/zonn-logo.svg
+!build/tray.png
+!build/tray.ico
 !build/linux/
 !build/linux/**
 !build/darwin/

@@ -76,6 +76,11 @@ export default function App() {
             <Banner text={state.notice || "This Zone needs a newer Zonn Node. Install the latest version."} />
           </div>
         )}
+        {state && state.waiting_for_idle && (
+          <div className="mb-4">
+            <Banner text={state.idle_note || "Waiting until you are away (Only when idle is on)."} />
+          </div>
+        )}
         {state && !state.enrolled && <EnrollPanel state={state} />}
         {state && tab === "overview" && <Overview state={state} />}
         {state && tab === "analytics" && <Analytics state={state} history={history} />}
@@ -104,19 +109,36 @@ function Header({ state, reachable }: { state: State | null; reachable: boolean 
             <div className="text-sm font-medium text-colony-cloud">{state?.node_name ?? "..."}</div>
             <div className="font-mono text-xs text-colony-mist">{state?.coordinator_url ?? ""}</div>
           </div>
-          <StatusPill online={online} paused={paused} connection={state?.connection ?? "DISCONNECTED"} />
+          <StatusPill
+            online={online}
+            paused={paused}
+            waiting={reachable && !!state?.waiting_for_idle}
+            connection={state?.connection ?? "DISCONNECTED"}
+          />
         </div>
       </div>
     </header>
   );
 }
 
-function StatusPill({ online, paused, connection }: { online: boolean; paused: boolean; connection: string }) {
+function StatusPill({
+  online,
+  paused,
+  waiting,
+  connection,
+}: {
+  online: boolean;
+  paused: boolean;
+  waiting: boolean;
+  connection: string;
+}) {
   // The palette carries no red or green, so status is icon plus label plus the
   // active/offline tones from the Drapery Drama palette (see blueprint.md 8.1),
   // never color alone.
   const label = paused
     ? "Paused"
+    : waiting
+      ? "Waiting for idle"
     : online
       ? "Online"
       : connection === "CONNECTING"
@@ -130,7 +152,7 @@ function StatusPill({ online, paused, connection }: { online: boolean; paused: b
   const dot = online ? "bg-colony-deep" : "bg-colony-slate";
   return (
     <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium ${cls}`}>
-      {paused ? <PauseGlyph /> : <span className={`h-2 w-2 rounded-full ${dot}`} />}
+      {paused || waiting ? <PauseGlyph /> : <span className={`h-2 w-2 rounded-full ${dot}`} />}
       {label}
     </span>
   );
@@ -649,6 +671,18 @@ function Settings({ state }: { state: State }) {
     }
   };
 
+  // applyNow saves one setting at once, rolling back on failure.
+  const applyNow = async (next: Config) => {
+    const before = cfg;
+    setCfg(next);
+    try {
+      setCfg(await saveConfig(next));
+    } catch {
+      setCfg(before);
+      setError("Could not apply that change. Is the node running?");
+    }
+  };
+
   const toggleCrashReports = async () => {
     const next = { ...cfg, crash_reports_enabled: !cfg.crash_reports_enabled };
     setCfg(next);
@@ -677,6 +711,64 @@ function Settings({ state }: { state: State }) {
           <Toggle on={cfg.available} busy={savingAvail} onChange={toggleAvailable} label="Available to the Zone" />
         </div>
       </Card>
+
+      <Card title="Only when idle">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <div className="text-sm font-medium text-colony-charcoal">
+              {cfg.only_when_idle ? `Contributing only after you have been away for ${cfg.idle_minutes} minutes` : "Contributing whenever this machine is available"}
+            </div>
+            <p className="mt-1 max-w-md text-sm text-colony-slate">
+              When on, this machine contributes only while nobody is using its keyboard or mouse, and stops as soon as
+              you come back. A Zone using it moves its work to its other machines.
+            </p>
+            {cfg.only_when_idle && (
+              <label className="mt-2 flex items-center gap-2 text-sm text-colony-slate">
+                Away for at least
+                <select
+                  value={cfg.idle_minutes}
+                  onChange={(e) => applyNow({ ...cfg, idle_minutes: Number(e.target.value) })}
+                  className="rounded border border-colony-mist bg-colony-cloud px-2 py-1 text-sm text-colony-charcoal outline-none focus:border-colony-core"
+                >
+                  {[1, 2, 5, 10, 15, 30, 60].map((m) => (
+                    <option key={m} value={m}>
+                      {m} {m === 1 ? "minute" : "minutes"}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </div>
+          <Toggle
+            on={cfg.only_when_idle}
+            busy={false}
+            onChange={() => applyNow({ ...cfg, only_when_idle: !cfg.only_when_idle })}
+            label="Only when idle"
+          />
+        </div>
+      </Card>
+
+      {state.desktop && (
+        <Card title="Start when you sign in">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <div className="text-sm font-medium text-colony-charcoal">
+                {cfg.auto_start ? "Zonn Node starts in the background when you sign in" : "Zonn Node starts only when you open it"}
+              </div>
+              <p className="mt-1 max-w-md text-sm text-colony-slate">
+                Closing the window keeps Zonn Node running; open it again from the tray icon (on macOS, from the Dock and
+                the Zonn Node menu). Quit it from there to stop contributing.
+              </p>
+            </div>
+            <Toggle
+              on={cfg.auto_start}
+              busy={false}
+              onChange={() => applyNow({ ...cfg, auto_start: !cfg.auto_start })}
+              label="Start when you sign in"
+            />
+          </div>
+        </Card>
+      )}
 
       <Card title="Community sharing">
         <div className="flex items-center justify-between gap-4">

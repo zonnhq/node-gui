@@ -36,9 +36,15 @@ type Config struct {
 	// Configured records that the starting allocation has been seeded. On the
 	// very first run it is false, so the daemon fills in a sensible 20% default
 	// instead of leaving everything at zero; after that the user's choices stand.
-	Configured   bool `json:"configured"`
+	Configured bool `json:"configured"`
+	// OnlyWhenIdle contributes only while the owner has been away (no keyboard
+	// or mouse input) for at least IdleMinutes, and stops as soon as they
+	// come back.
 	OnlyWhenIdle bool `json:"only_when_idle"`
-	AutoStart    bool `json:"auto_start"`
+	IdleMinutes  int  `json:"idle_minutes"`
+	// AutoStart starts Zonn Node, hidden, when the user signs in. Only the
+	// desktop app acts on it.
+	AutoStart bool `json:"auto_start"`
 	// CrashReportsEnabled sends an anonymized report (error type, stack trace,
 	// operating system only, never hostname, username, or IP) to the Coordinator
 	// if the daemon recovers from a panic, so the operator can see it happened.
@@ -51,6 +57,13 @@ type Config struct {
 }
 
 var writeMu sync.Mutex
+
+// DefaultIdleMinutes is how long the owner must be away before a node with
+// Only when idle contributes; MaxIdleMinutes caps the setting.
+const (
+	DefaultIdleMinutes = 5
+	MaxIdleMinutes     = 120
+)
 
 // Dir returns the node's config directory, creating it if needed. It is
 // ~/.zonn (moved there from ~/.colony on first start after an upgrade), but
@@ -102,6 +115,7 @@ func Default() Config {
 		Available:           true,
 		Configured:          false,
 		OnlyWhenIdle:        false,
+		IdleMinutes:         DefaultIdleMinutes,
 		AutoStart:           false,
 		CrashReportsEnabled: true,
 	}
@@ -158,6 +172,10 @@ func Load() (Config, error) {
 	// by default, matching a fresh install rather than silently opting out.
 	if _, ok := present["crash_reports_enabled"]; !ok {
 		cfg.CrashReportsEnabled = true
+		rewrite = true
+	}
+	if cfg.IdleMinutes <= 0 {
+		cfg.IdleMinutes = DefaultIdleMinutes
 		rewrite = true
 	}
 	// Backfill a stable id for configs written before it existed.
