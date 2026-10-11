@@ -1,0 +1,115 @@
+name: Release
+
+# Builds Zonn Node installers. Each bundles the self-contained inference runner
+# from the backend's release BACKEND_TAG (the backend repository is private;
+# the BACKEND_RELEASE_TOKEN secret needs read access to it):
+#
+#   Windows   Zonn-Node-Setup-Windows-x64.exe, and -NVIDIA.exe with CUDA
+#   Linux     zonn-node_VERSION_amd64.deb, and zonn-node-nvidia with CUDA
+#   macOS     Zonn-Node-VERSION-macOS-apple-silicon.dmg and -intel.dmg
+#
+# Installers are uploaded as workflow artifacts for checking on clean
+# machines. Publishing them (to the Console's Downloads folder on the server,
+# or a GitHub release) is a separate, deliberate step.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Installer version, without the v prefix
+        required: true
+      backend_tag:
+        description: Backend release whose runner bundles to ship, for example v0.2.0
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  installers:
+    name: ${{ matrix.label }} ${{ matrix.variant }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-22.04, label: linux-x64, platform: linux/amd64, variant: cpu }
+          - { os: ubuntu-22.04, label: linux-x64, platform: linux/amd64, variant: nvidia }
+          - { os: windows-latest, label: windows-x64, platform: windows/amd64, variant: cpu }
+          - { os: windows-latest, label: windows-x64, platform: windows/amd64, variant: nvidia }
+          - { os: macos-15-intel, label: macos-intel, platform: darwin/amd64, variant: cpu, dmg: intel }
+          - { os: macos-15, label: macos-apple-silicon, platform: darwin/arm64, variant: cpu, dmg: apple-silicon }
+    runs-on: ${{ matrix.os }}
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Validate the version
+        shell: bash
+        run: |
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z]+)*$ ]] || { echo "invalid version $VERSION"; exit 1; }
+
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+
+      - name: Fetch the inference runner from the backend release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.BACKEND_RELEASE_TOKEN }}
+          BACKEND_REPO: ${{ vars.BACKEND_REPO || 'zonnhq/backend' }}
+          RUNNER_LABEL: ${{ matrix.label }}
+        run: scripts/fetch-runner.sh ${{ matrix.variant }} --release "${{ inputs.backend_tag }}"
+
+      - name: Build the desktop app
+        shell: bash
+        run: |
+          go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
+          node -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync("wails.json")); p.info.productVersion=process.env.VERSION; fs.writeFileSync("wails.json", JSON.stringify(p, null, 2)+"\n")'
+          wails build -clean -trimpath -tags "desktop,webkit2_41" \
+            -ldflags "-X github.com/zonnhq/node-gui/internal/version.Version=v${VERSION}" \
+            -skipbindings -platform "${{ matrix.platform }}" -webview2 embed -o zonn-node
+
+      - name: Ubuntu package
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          build/linux/build-deb.sh "$VERSION" ${{ matrix.variant }}
+          dpkg-deb --info build/installer/*.deb
+
+      - name: macOS disk image
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          build/darwin/build-dmg.sh "$VERSION" ${{ matrix.dmg }}
+          hdiutil verify build/installer/*.dmg
+
+      - name: Windows Setup
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          $sourceDir = (Resolve-Path "build/bin").Path
+          if (Test-Path "$sourceDir\zonn-node") { Move-Item "$sourceDir\zonn-node" "$sourceDir\zonn-node.exe" }
+          Copy-Item -Recurse "build/worker/*" "$sourceDir/"
+          $variant = @()
+          if ("${{ matrix.variant }}" -eq "nvidia") { $variant = @("/DNvidia") }
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" `
+            "/DAppVersion=$env:VERSION" "/DSourceDir=$sourceDir" `
+            "/DIconFile=$((Resolve-Path 'build/zonn-node.ico').Path)" @variant `
+            "build/windows/zonn-node.iss"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zonn-node-${{ matrix.label }}-${{ matrix.variant }}-${{ inputs.version }}
+          path: build/installer/*
+          if-no-files-found: error

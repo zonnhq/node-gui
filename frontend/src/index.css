@@ -1,0 +1,44 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  background-color: #C6C5BF;
+  color: #0A0A0C;
+  font-family: "JetBrains Mono", "Cascadia Code", "Ubuntu Mono", "DejaVu Sans Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Slider styled with the palette, no red or green. */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 6px;
+  border-radius: 4px;
+  background: #878782;
+  outline: none;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #544943;
+  cursor: pointer;
+  border: 2px solid #C6C5BF;
+}
+input[type="range"]::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #544943;
+  cursor: pointer;
+  border: 2px solid #C6C5BF;
+}

@@ -1,0 +1,151 @@
+syntax = "proto3";
+
+package colony.v1;
+
+option go_package = "github.com/zonnhq/backend/api/proto;colonyv1";
+
+// NodeService is the contract between a Node agent and the Coordinator.
+service NodeService {
+  // Enroll exchanges a one time enrollment code, created by a provider in Zonn
+  // Console, for this node's long lived credential. It is the only call that
+  // does not need a credential; every other call carries gRPC metadata
+  // "x-node-id: <node id>" and "authorization: Bearer <node secret>".
+  rpc Enroll(EnrollRequest) returns (EnrollResponse);
+
+  // Register is called once when a node comes online. The Coordinator assigns
+  // a node id and returns the list of currently active colonies.
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+
+  // Heartbeat is a bidirectional stream. The node sends its live utilization
+  // every few seconds and the Coordinator replies with an acknowledgement that
+  // carries the node's current colony assignment and any pending command.
+  rpc Heartbeat(stream HeartbeatRequest) returns (stream HeartbeatResponse);
+
+  // ReportError pushes a node side error into the Coordinator issues feed.
+  rpc ReportError(ReportErrorRequest) returns (ReportErrorResponse);
+
+  // SetOffline lets a node tell the Coordinator it is going offline on purpose
+  // (the operator paused contribution), so the fleet reflects it at once instead
+  // of waiting for the reaper to notice the missing heartbeats.
+  rpc SetOffline(SetOfflineRequest) returns (SetOfflineResponse);
+}
+
+// Total physical resources on a machine.
+message Resources {
+  int32 cpu_cores = 1;
+  int32 ram_gb = 2;
+  string gpu_model = 3;
+  int32 gpu_memory_gb = 4;
+  int32 disk_gb = 5;
+}
+
+// The share of resources a contributor chooses to donate.
+message Allocation {
+  int32 cpu_cores = 1;
+  int32 ram_gb = 2;
+  int32 gpu_memory_gb = 3;
+  int32 bandwidth_mbps = 4;
+}
+
+// Live usage sampled by the node agent.
+message Utilization {
+  double cpu_used = 1;
+  double ram_used_gb = 2;
+  double gpu_mem_used_gb = 3;
+  double gpu_temp_c = 4;
+}
+
+message RegisterRequest {
+  string name = 1;
+  string os = 2;
+  string arch = 3;
+  Resources resources = 4;
+  Allocation allocated = 5;
+  // The node's id. It must match the id the call is authenticated as; nodes
+  // get their id from Enroll.
+  string node_id = 6;
+  // Stable hardware fingerprint of the machine, refreshed on every register.
+  // Enroll uses it to recognise a machine that is enrolled again, so one
+  // device never shows up as two nodes.
+  string fingerprint = 7;
+  // Zonn Node version, checked against the Coordinator's minimum version.
+  string app_version = 8;
+  // The owner's choice to let this machine join community Zones too.
+  bool share_community = 9;
+  // The accelerator the node's inference runtime can use: "cuda", "mps", or
+  // empty for CPU only. A GPU the runtime cannot drive is not reported.
+  string accelerator = 10;
+}
+
+message EnrollRequest {
+  string enrollment_code = 1;
+  string name = 2;
+  string os = 3;
+  string arch = 4;
+  Resources resources = 5;
+  Allocation allocated = 6;
+  string fingerprint = 7;
+  string app_version = 8;
+  bool share_community = 9;
+}
+
+message EnrollResponse {
+  string node_id = 1;
+  // Authenticates every later call. Shown to the node once; the Coordinator
+  // stores only a hash of it.
+  string node_secret = 2;
+}
+
+message ColonySummary {
+  string id = 1;
+  string name = 2;
+}
+
+message RegisterResponse {
+  string node_id = 1;
+  repeated ColonySummary colonies = 2;
+  int32 heartbeat_interval_seconds = 3;
+}
+
+message HeartbeatRequest {
+  string node_id = 1;
+  string timestamp = 2; // RFC3339
+  Utilization utilization = 3;
+  string current_colony_id = 4;
+  double worker_cpu_cores = 5;
+  double worker_ram_gb = 6;
+  bool worker_active = 7;
+}
+
+message HeartbeatResponse {
+  string status = 1;             // ACK or REREGISTER
+  string assigned_colony_id = 2; // colony the coordinator has placed this node in
+  string command = 3;            // optional command, empty when there is nothing to do
+
+  // Live standing in the fleet, so the node can show its rank without a
+  // separate call. Computed by the Coordinator on each heartbeat.
+  int32 rank = 4;                // 1-based position among active nodes by score
+  int32 active_nodes = 5;        // number of currently active nodes
+  double contribution_score = 6; // this node's score
+  double average_score = 7;      // average score across active nodes
+}
+
+message ReportErrorRequest {
+  string node_id = 1;
+  string level = 2;   // INFO, WARN, ERROR
+  string message = 3;
+  string timestamp = 4;
+}
+
+message ReportErrorResponse {
+  bool ok = 1;
+}
+
+message SetOfflineRequest {
+  string node_id = 1;
+  string reason = 2; // short human reason, for example "paused by operator"
+}
+
+message SetOfflineResponse {
+  bool ok = 1;
+}

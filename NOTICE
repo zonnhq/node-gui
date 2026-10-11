@@ -1,0 +1,15 @@
+Zonn Node
+Copyright 2026 Zonn
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+"Zonn", "Zonn Node", and the Zonn logo are trademarks of Zonn. As section 6 of
+the Apache License states, the license does not grant permission to use them,
+except as needed to describe where the software comes from. A modified version
+distributed by anyone else must not be presented as Zonn Node and must not use
+the Zonn logo.
+
+The installers also include a separately licensed, self-contained inference
+runner built from Zonn's private backend, which is not covered by this
+license, along with the open source libraries it bundles (Python, PyTorch,
+Transformers, NumPy, and their dependencies) under their own licenses.

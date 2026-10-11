@@ -1,0 +1,38 @@
+# Generated and packaging output; keep installer definitions and icons.
+build/*
+!build/appicon.png
+!build/zonn-node.ico
+!build/zonn-logo.svg
+!build/linux/
+!build/linux/**
+!build/darwin/
+!build/darwin/**
+!build/windows/
+!build/windows/**
+
+# Wails and the UI
+frontend/node_modules/
+frontend/dist/
+frontend/package.json.md5
+frontend/wailsjs/
+*.tsbuildinfo
+
+# Go
+*.exe
+*.test
+*.out
+/noded
+/zonn-node
+
+# Local data
+*.db
+.env
+
+# OS and editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+go.work
+go.work.sum
