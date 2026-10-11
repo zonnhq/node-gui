@@ -13,3 +13,7 @@ The installers also include a separately licensed, self-contained inference
 runner built from Zonn's private backend, which is not covered by this
 license, along with the open source libraries it bundles (Python, PyTorch,
 Transformers, NumPy, and their dependencies) under their own licenses.
+
+The user interface bundles the JetBrains Mono font (frontend/src/fonts),
+Copyright 2020 The JetBrains Mono Project Authors, licensed under the SIL
+Open Font License 1.1; see frontend/src/fonts/jetbrains-mono/OFL.txt.
