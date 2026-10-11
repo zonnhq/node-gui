@@ -81,6 +81,11 @@ export default function App() {
             </div>
           )
         )}
+        {state && state.connection === "DISCONNECTED" && state.notice && (
+          <div className="mb-4">
+            <Banner text={state.notice} />
+          </div>
+        )}
         {state && state.waiting_for_idle && (
           <div className="mb-4">
             <Banner text={state.idle_note || "Waiting until you are away (Only when idle is on)."} />

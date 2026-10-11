@@ -444,7 +444,7 @@ func (d *Daemon) Run(ctx context.Context) {
 		if d.connectOnce(ctx) {
 			backoff = minBackoff // a clean session resets the backoff
 		}
-		if d.Snapshot().Connection == UpdateRequired {
+		if st := d.Snapshot(); st.Connection == UpdateRequired || (st.Connection == Disconnected && st.Notice != "") {
 			// Nothing changes until the app is updated or the Zone lowers its
 			// minimum version, so check back slowly.
 			backoff = maxBackoff
@@ -608,6 +608,15 @@ func (d *Daemon) connectOnce(ctx context.Context) bool {
 			d.creds = nil
 			d.mu.Unlock()
 			d.setConnection(Unenrolled)
+		case codes.PermissionDenied:
+			// The owner's account is suspended. Nothing the node does fixes
+			// it, so it says so and checks back slowly.
+			msg := status.Convert(err).Message()
+			d.log("ERROR", msg)
+			d.mu.Lock()
+			d.notice = msg
+			d.mu.Unlock()
+			d.setConnection(Disconnected)
 		case codes.FailedPrecondition:
 			msg := status.Convert(err).Message()
 			d.log("ERROR", msg)
