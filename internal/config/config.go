@@ -1,6 +1,7 @@
 // Package config reads and writes the contributor's node settings at
-// ~/.colony/config.json. It is the single place the user's allocation choices
-// and the Coordinator address are stored.
+// ~/.zonn/config.json. It is the single place the user's allocation choices
+// and the Coordinator address are stored. Versions before the rename used
+// ~/.colony, which is moved to ~/.zonn on first start (see migrate.go).
 package config
 
 import (
@@ -11,6 +12,7 @@ import (
 	mrand "math/rand"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -50,22 +52,35 @@ type Config struct {
 
 var writeMu sync.Mutex
 
-// Dir returns the node's config directory, creating it if needed. It defaults to
-// ~/.colony, but COLONY_HOME overrides it so several nodes can run on one machine
-// without changing HOME (which would hide the user's Python packages).
+// Dir returns the node's config directory, creating it if needed. It is
+// ~/.zonn (moved there from ~/.colony on first start after an upgrade), but
+// ZONN_HOME overrides it so several nodes can run on one machine without
+// changing HOME (which would hide the user's Python packages).
 func Dir() (string, error) {
-	dir := os.Getenv("COLONY_HOME")
+	dir := Env("ZONN_HOME")
 	if dir == "" {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return "", err
 		}
-		dir = filepath.Join(home, ".colony")
+		dir = defaultDir(home)
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
 	return dir, nil
+}
+
+// Env reads a ZONN_ environment variable, falling back to its COLONY_ name
+// from before the rename, so existing setups keep working.
+func Env(name string) string {
+	if v := os.Getenv(name); v != "" {
+		return v
+	}
+	if rest, ok := strings.CutPrefix(name, "ZONN_"); ok {
+		return os.Getenv("COLONY_" + rest)
+	}
+	return ""
 }
 
 // Path returns the config file path.

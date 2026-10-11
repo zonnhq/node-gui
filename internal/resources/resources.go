@@ -8,7 +8,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"os"
 	"os/exec"
 	"runtime"
 	"strconv"
@@ -19,6 +18,8 @@ import (
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/host"
 	"github.com/shirou/gopsutil/v3/mem"
+
+	"github.com/zonnhq/node-gui/internal/config"
 )
 
 // Specs is the detected physical hardware.
@@ -80,7 +81,7 @@ func Detect() Specs {
 func Fingerprint() string {
 	// An explicit override lets several nodes run on one machine (local testing,
 	// or a deliberate multi-tenant host) without collapsing into one record.
-	if v := strings.TrimSpace(os.Getenv("COLONY_FINGERPRINT")); v != "" {
+	if v := strings.TrimSpace(config.Env("ZONN_FINGERPRINT")); v != "" {
 		return v
 	}
 	parts := []string{runtime.GOARCH}

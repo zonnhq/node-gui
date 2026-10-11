@@ -23,7 +23,7 @@ its own with no window, which is the roadmap's headless fallback.
 
 ```
 cmd/noded/            headless daemon runner (no window, fully testable)
-internal/config/      ~/.colony/config.json, plus the node credential in credentials.json (0600)
+internal/config/      ~/.zonn/config.json, plus the node credential in credentials.json (0600)
 internal/resources/   hardware detection (gopsutil) and GPU (nvidia-smi, system_profiler)
 internal/client/      gRPC client to the backend
 internal/nodeproto/   code generated from proto/node.proto
@@ -45,9 +45,16 @@ go run ./cmd/noded -coordinator localhost:8080 -enroll ze_...   # code from Zonn
 ```
 
 To serve Zones from source, point it at the runner in a backend checkout:
-`COLONY_WORKER_SCRIPT=../backend/runner/inference_worker.py` and
-`COLONY_PYTHON` at a Python with `../backend/runner/requirements.txt` and
-PyTorch installed.
+`ZONN_WORKER_SCRIPT=../backend/runner/inference_worker.py` and
+`ZONN_PYTHON` at a Python with `../backend/runner/requirements.txt` and
+PyTorch installed. `ZONN_HOME` gives a node its own settings folder and
+`ZONN_FINGERPRINT` its own identity, to run several on one machine.
+
+Settings live in `~/.zonn/`. Versions before the rename used `~/.colony/`: on
+first start Zonn Node copies that folder to `~/.zonn/`, checks the copy, and
+removes the old one, keeping the credential so the machine stays enrolled (if
+the copy fails it keeps using `~/.colony/`). The `COLONY_*` variable names
+still work when the `ZONN_*` name is unset.
 
 `-enroll` is only needed once; the credential is saved for later runs.
 
@@ -94,7 +101,7 @@ Installers bundle a native `inference-worker` containing Python, numpy, CPU
 PyTorch, and Transformers for both mock and real Playground runs, so contributors
 install no language runtime or dependencies. Models download on first use and are
 then read from the local Hugging Face cache. A source or custom deployment can put that
-script in `~/.colony/` or set `COLONY_WORKER_SCRIPT`.
+script in `~/.zonn/` or set `ZONN_WORKER_SCRIPT`.
 
 Install candidates are a Windows Setup `.exe`, an Ubuntu `.deb`, and a macOS
 `.dmg`. The build workflow uploads them for clean-machine verification and never

@@ -16,8 +16,8 @@ func TestScriptPathUsesColonyHome(t *testing.T) {
 	if err := os.WriteFile(want, []byte("# test worker\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("COLONY_HOME", dir)
-	t.Setenv("COLONY_WORKER_SCRIPT", "")
+	t.Setenv("ZONN_HOME", dir)
+	t.Setenv("ZONN_WORKER_SCRIPT", "")
 	got, err := scriptPath()
 	if err != nil {
 		t.Fatal(err)
@@ -33,7 +33,7 @@ func TestScriptPathUsesReleasedBinaryDirectory(t *testing.T) {
 	if err := os.WriteFile(want, []byte("# packaged worker\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("COLONY_HOME", filepath.Join(dir, "empty-data-dir"))
+	t.Setenv("ZONN_HOME", filepath.Join(dir, "empty-data-dir"))
 	got, err := findScriptPath(filepath.Join(dir, "colony-node.exe"), "windows")
 	if err != nil {
 		t.Fatal(err)
@@ -84,7 +84,7 @@ func TestRealEngineUsesBundledWorker(t *testing.T) {
 	if err := os.WriteFile(want, []byte("test worker"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("COLONY_WORKER_EXECUTABLE", want)
+	t.Setenv("ZONN_WORKER_EXECUTABLE", want)
 
 	program, args, err := workerCommand("real")
 	if err != nil {

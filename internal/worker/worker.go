@@ -19,6 +19,8 @@ import (
 	"time"
 
 	"github.com/shirou/gopsutil/v3/process"
+
+	"github.com/zonnhq/node-gui/internal/config"
 )
 
 const bytesPerGB = 1024 * 1024 * 1024
@@ -44,7 +46,7 @@ type Command struct {
 // scriptPath resolves the worker script from an explicit override, the node's
 // data directory, or next to the released desktop binary.
 func scriptPath() (string, error) {
-	if s := os.Getenv("COLONY_WORKER_SCRIPT"); s != "" {
+	if s := config.Env("ZONN_WORKER_SCRIPT"); s != "" {
 		if _, err := os.Stat(s); err != nil {
 			return "", fmt.Errorf("worker script not found at %s", s)
 		}
@@ -57,10 +59,8 @@ func scriptPath() (string, error) {
 
 func findScriptPath(executable, goos string) (string, error) {
 	var candidates []string
-	if dataDir := os.Getenv("COLONY_HOME"); dataDir != "" {
+	if dataDir, err := config.Dir(); err == nil {
 		candidates = append(candidates, filepath.Join(dataDir, "inference_worker.py"))
-	} else if home, err := os.UserHomeDir(); err == nil {
-		candidates = append(candidates, filepath.Join(home, ".colony", "inference_worker.py"))
 	}
 	if executable != "" {
 		appDir := filepath.Dir(executable)
@@ -77,11 +77,11 @@ func findScriptPath(executable, goos string) (string, error) {
 			return candidate, nil
 		}
 	}
-	return "", fmt.Errorf("worker script not found; place inference_worker.py in the Zonn Node folder or set COLONY_WORKER_SCRIPT")
+	return "", fmt.Errorf("worker script not found; place inference_worker.py in the Zonn Node folder or set ZONN_WORKER_SCRIPT")
 }
 
 func pythonCommand() (string, []string, error) {
-	if p := os.Getenv("COLONY_PYTHON"); p != "" {
+	if p := config.Env("ZONN_PYTHON"); p != "" {
 		return p, nil, nil
 	}
 	candidates := []struct {
@@ -106,11 +106,11 @@ func pythonCommand() (string, []string, error) {
 			return path, candidate.args, nil
 		}
 	}
-	return "", nil, fmt.Errorf("Python 3 was not found; install Python 3 or set COLONY_PYTHON")
+	return "", nil, fmt.Errorf("Python 3 was not found; install Python 3 or set ZONN_PYTHON")
 }
 
 func bundledWorkerPath(appExecutable, goos string) (string, error) {
-	if configured := os.Getenv("COLONY_WORKER_EXECUTABLE"); configured != "" {
+	if configured := config.Env("ZONN_WORKER_EXECUTABLE"); configured != "" {
 		if info, err := os.Stat(configured); err == nil && !info.IsDir() {
 			return configured, nil
 		}
