@@ -139,6 +139,19 @@ window, all verified live against the backend.
   freedesktop screensaver service over D-Bus, or `xprintidle`. Where none is
   available the node does not contribute and says why.
 
+## Community sharing
+
+Off by default. When on, the backend may also place the machine in community
+Zones that serve other people, once it has been online long enough. On a
+community Zone the machine holds middle layers of the model and receives
+hidden states only (the numbers passed between layers), never the prompt or
+the answer as text or token ids; the first and last stages run on machines
+the operator trusts. Now and then the operator repeats some of the machine's
+work on a trusted machine and compares the results; repeated mismatches take
+it out of community Zones until an admin clears the record. Settings shows
+where the machine stands, as reported on every heartbeat. Turning sharing off
+takes the machine out of any community Zone at once.
+
 ## Updates
 
 Zonn Node checks the backend for a newer version when it starts and every 6

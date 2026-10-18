@@ -63,6 +63,13 @@ type Ranking struct {
 	AverageScore float64 `json:"average_score"`
 }
 
+// Community is this machine's standing for community Zones, as the
+// Coordinator reports it on every heartbeat.
+type Community struct {
+	Status   string `json:"status"` // one sentence; empty from older Coordinators
+	Eligible bool   `json:"eligible"`
+}
+
 // ColonyUsage is how much of the contribution the Zone is actually using right
 // now, measured from the worker process. It is zero when no job is running.
 type ColonyUsage struct {
@@ -85,6 +92,7 @@ type State struct {
 	Utilization    resources.Utilization `json:"utilization"`
 	ColonyUsage    ColonyUsage           `json:"colony_usage"`
 	Ranking        Ranking               `json:"ranking"`
+	Community      Community             `json:"community"`
 	Events         []Event               `json:"events"`
 	// Enrolled is true when the node holds a credential for the configured
 	// Coordinator.
@@ -127,6 +135,7 @@ type Daemon struct {
 	colonyID    string
 	util        resources.Utilization
 	ranking     Ranking
+	community   Community
 	events      []Event
 	conn        *client.Client
 	gpuOverTemp bool
@@ -351,6 +360,7 @@ func (d *Daemon) Snapshot() State {
 			Active:   len(d.workers) > 0,
 		},
 		Ranking:        d.ranking,
+		Community:      d.community,
 		Events:         events,
 		Enrolled:       d.enrolledLocked(),
 		Notice:         d.notice,
@@ -740,6 +750,7 @@ func (d *Daemon) heartbeatLoop(ctx context.Context, cli *client.Client, nodeID s
 				Score:        ack.GetContributionScore(),
 				AverageScore: ack.GetAverageScore(),
 			}
+			d.community = Community{Status: ack.GetCommunityStatus(), Eligible: ack.GetCommunityEligible()}
 			d.mu.Unlock()
 			d.checkGPUTemp(util.GPUTempC)
 			d.handleCommand(ctx, ack.GetCommand())

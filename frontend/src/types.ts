@@ -54,6 +54,9 @@ export interface State {
   utilization: Utilization;
   colony_usage: ColonyUsage;
   ranking: Ranking;
+  // community is this machine's standing for community Zones, from the
+  // Coordinator; status is empty until it says.
+  community: { status: string; eligible: boolean };
   events: ActivityEvent[];
   // enrolled is true once this machine holds a credential for the configured
   // Coordinator; until then it waits for an enrollment code.

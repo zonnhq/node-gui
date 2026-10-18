@@ -823,10 +823,18 @@ function Settings({ state }: { state: State }) {
               {cfg.share_community ? "Shared with the community pool" : "Only your own Zones use this machine"}
             </div>
             <p className="mt-1 max-w-md text-sm text-colony-slate">
-              When on, Zonn may also include this machine in community Zones that serve other people. Their prompts and
-              answers then pass through this machine while it computes its share. Turning this off takes the machine out of
-              any community Zone at once.
+              When on, Zonn may also include this machine in community Zones that serve other people, once it has been online
+              long enough. It then holds middle layers and receives only hidden states (the numbers passed between layers),
+              not the prompts and answers themselves: the first and last stages run on machines Zonn operates. Now and then a trusted machine
+              repeats some of its work to check it; repeated mismatches take it out of community Zones. Turning this off takes
+              the machine out of any community Zone at once.
             </p>
+            {state.community?.status && (
+              <p className="mt-2 max-w-md text-sm text-colony-charcoal">
+                <span className="mr-2 font-semibold" aria-hidden>{state.community.eligible ? "✓" : "…"}</span>
+                {state.community.status}
+              </p>
+            )}
           </div>
           <Toggle on={cfg.share_community} busy={false} onChange={toggleShare} label="Share with the community pool" />
         </div>

@@ -139,6 +139,12 @@ message HeartbeatResponse {
   int32 active_nodes = 5;        // number of currently active nodes
   double contribution_score = 6; // this node's score
   double average_score = 7;      // average score across active nodes
+
+  // Standing for community Zones, shown to the machine's owner: one sentence
+  // (for example "Not yet eligible for community Zones: online 3.0 of the 24
+  // hours needed"), and whether community Zones may use the machine.
+  string community_status = 8;
+  bool community_eligible = 9;
 }
 
 message ReportErrorRequest {
