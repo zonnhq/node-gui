@@ -1,4 +1,4 @@
-import type { Config, State } from "./types";
+import type { CacheState, Config, State } from "./types";
 
 // The local daemon serves live data on port 9090. Using an absolute base means
 // the dashboard works both inside the Wails webview and in a plain browser.
@@ -58,4 +58,15 @@ export async function updateAction(action: "check" | "install"): Promise<void> {
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error || `update failed: ${res.status}`);
+}
+
+// clearCache removes every downloaded model no running stage needs.
+export async function clearCache(): Promise<CacheState> {
+  const res = await fetch(`${BASE}/api/cache`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "clear" }),
+  });
+  if (!res.ok) throw new Error(`clearing the cache failed: ${res.status}`);
+  return res.json();
 }

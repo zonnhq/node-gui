@@ -11,8 +11,8 @@ import {
   CartesianGrid,
   Tooltip,
 } from "recharts";
-import { enroll, fetchState, fetchConfig, saveConfig, updateAction } from "./api";
-import type { Allocation, Config, State, UpdateState } from "./types";
+import { clearCache, enroll, fetchState, fetchConfig, saveConfig, updateAction } from "./api";
+import type { Allocation, Config, Download, State, UpdateState } from "./types";
 
 type Tab = "overview" | "analytics" | "settings" | "activity";
 
@@ -283,8 +283,42 @@ function Overview({ state }: { state: State }) {
         )}
       </Card>
 
+      {state.downloads?.length > 0 && <Downloads downloads={state.downloads} />}
       <ContributionUsage state={state} />
     </div>
+  );
+}
+
+// sizeText shows bytes in MB, or GB from 1 GB up.
+function sizeText(n: number): string {
+  return n >= 1 << 30 ? `${(n / (1 << 30)).toFixed(1)} GB` : `${Math.round(n / (1 << 20))} MB`;
+}
+
+// Downloads shows model weights being downloaded for a Zone. Each machine
+// downloads only the part of a model its stage holds, once; later runs load it
+// from the model cache.
+function Downloads({ downloads }: { downloads: Download[] }) {
+  return (
+    <Card title="Downloading model weights">
+      <div className="space-y-3">
+        {downloads.map((d) => {
+          const pct = d.total > 0 ? Math.min(100, Math.round((d.done / d.total) * 100)) : 0;
+          return (
+            <div key={d.model}>
+              <div className="flex justify-between text-sm text-colony-charcoal">
+                <span>{d.model}</span>
+                <span className="text-colony-slate">
+                  {sizeText(d.done)} of {sizeText(d.total)} ({pct}%)
+                </span>
+              </div>
+              <div className="mt-1 h-1.5 w-full overflow-hidden rounded bg-colony-mist">
+                <div className="h-full bg-colony-core" style={{ width: `${pct}%` }} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </Card>
   );
 }
 
@@ -780,6 +814,8 @@ function Settings({ state }: { state: State }) {
         </Card>
       )}
 
+      <ModelCache state={state} cfg={cfg} apply={applyNow} />
+
       <Card title="Community sharing">
         <div className="flex items-center justify-between gap-4">
           <div>
@@ -903,6 +939,95 @@ function Settings({ state }: { state: State }) {
         </div>
       </Card>
     </div>
+  );
+}
+
+// ModelCache shows the downloaded model weights and their limit. Past the
+// limit, the models used least recently are removed, never one a Zone is using
+// here; Clear removes everything not in use.
+function ModelCache({ state, cfg, apply }: { state: State; cfg: Config; apply: (next: Config) => Promise<void> }) {
+  const cache = state.model_cache;
+  const [clearing, setClearing] = useState(false);
+  const [error, setError] = useState("");
+  const capBytes = cfg.model_cache_gb * (1 << 30);
+  const pct = capBytes > 0 ? Math.min(100, Math.round((cache.bytes / capBytes) * 100)) : 0;
+  const clear = async () => {
+    setClearing(true);
+    setError("");
+    try {
+      await clearCache();
+    } catch {
+      setError("Could not clear the cache. Is the node running?");
+    } finally {
+      setClearing(false);
+    }
+  };
+  return (
+    <Card
+      title="Model cache"
+      action={
+        <button
+          type="button"
+          onClick={clear}
+          disabled={clearing || !cache.models?.some((m) => !m.in_use)}
+          className="rounded border border-colony-core px-2 py-1 text-xs text-colony-core hover:bg-colony-core hover:text-colony-cloud disabled:opacity-50"
+        >
+          {clearing ? "Clearing" : "Clear cache"}
+        </button>
+      }
+    >
+      <p className="text-sm text-colony-slate">
+        Model weights this machine downloaded for Zones, kept so the next run loads without downloading again. Past the
+        limit, the models used least recently are removed; a model a Zone is using here is never removed.
+      </p>
+      <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-colony-charcoal">
+        <span>
+          {sizeText(cache.bytes)} used{capBytes > 0 ? ` of ${cfg.model_cache_gb} GB (${pct}%)` : ", no limit"}
+        </span>
+        <label className="flex items-center gap-2 text-colony-slate">
+          Limit
+          <select
+            value={cfg.model_cache_gb}
+            onChange={(e) => apply({ ...cfg, model_cache_gb: Number(e.target.value) })}
+            className="rounded border border-colony-mist bg-colony-cloud px-2 py-1 text-sm text-colony-charcoal outline-none focus:border-colony-core"
+          >
+            {[...new Set([1, 2, 5, 10, 20, 50, 100, cfg.model_cache_gb])]
+              .filter((g) => g > 0)
+              .sort((a, b) => a - b)
+              .map((g) => (
+                <option key={g} value={g}>
+                  {g} GB
+                </option>
+              ))}
+            <option value={0}>No limit</option>
+          </select>
+        </label>
+      </div>
+      {capBytes > 0 && (
+        <div className="mt-2 h-1.5 w-full overflow-hidden rounded bg-colony-mist">
+          <div className="h-full bg-colony-core" style={{ width: `${pct}%` }} />
+        </div>
+      )}
+      {cache.models?.length > 0 ? (
+        <ul className="mt-3 space-y-1 text-sm">
+          {[...cache.models].reverse().map((m) => (
+            <li key={m.name} className="flex justify-between gap-3">
+              <span className="text-colony-charcoal">
+                {m.name}
+                {m.in_use && <span className="ml-2 text-xs font-medium text-colony-core">In use</span>}
+              </span>
+              <span className="shrink-0 text-colony-slate">
+                {sizeText(m.bytes)}, used {new Date(m.last_used).toLocaleString()}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-3 text-sm text-colony-slate">No models downloaded yet.</p>
+      )}
+      <p className="mt-2 font-mono text-xs text-colony-slate">{cache.dir}</p>
+      {error && <p className="mt-2 text-sm text-colony-indigo">{error}</p>}
+    </Card>
   );
 }
 

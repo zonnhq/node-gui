@@ -187,3 +187,20 @@ func TestBundledWorkerFindsTheNvidiaFolderLayout(t *testing.T) {
 		t.Fatalf("got %q, %v; want %q", got, err, want)
 	}
 }
+
+func TestReadOutputLogsLinesAndPassesOnDownloads(t *testing.T) {
+	out := "stage 0: connected\r\nZONN_DOWNLOAD {\"model\":\"org/m\",\"done\":5,\"total\":10}\nprogress 10%\rprogress 20%\n\nstage 0: error: boom"
+	var logged []string
+	var downloads []Download
+	last := readOutput(strings.NewReader(out), func(_, m string) { logged = append(logged, m) }, func(d Download) { downloads = append(downloads, d) })
+	want := []string{"worker: stage 0: connected", "worker: progress 10%", "worker: progress 20%", "worker: stage 0: error: boom"}
+	if strings.Join(logged, "|") != strings.Join(want, "|") {
+		t.Fatalf("logged %q", logged)
+	}
+	if len(downloads) != 1 || downloads[0] != (Download{Model: "org/m", Done: 5, Total: 10}) {
+		t.Fatalf("downloads %+v", downloads)
+	}
+	if lastWorkerError(strings.Join(last, "\n")) != "stage 0: error: boom" {
+		t.Fatalf("last lines %q", last)
+	}
+}

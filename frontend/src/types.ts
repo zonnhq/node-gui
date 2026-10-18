@@ -67,6 +67,31 @@ export interface State {
   // desktop is true when the desktop app runs the node (start at sign in).
   desktop: boolean;
   update: UpdateState;
+  // downloads are model weights stage workers are downloading now, in bytes.
+  downloads: Download[];
+  model_cache: CacheState;
+}
+
+export interface Download {
+  model: string;
+  done: number;
+  total: number;
+}
+
+// CacheModel is one model in the model cache.
+export interface CacheModel {
+  name: string;
+  bytes: number;
+  last_used: string;
+  in_use: boolean;
+}
+
+// CacheState is the model cache: its folder, cap (0 means no limit), and models.
+export interface CacheState {
+  dir: string;
+  cap_gb: number;
+  bytes: number;
+  models: CacheModel[];
 }
 
 // UpdateState is a newer Zonn Node published on the backend.
@@ -92,4 +117,6 @@ export interface Config {
   auto_start: boolean;
   crash_reports_enabled: boolean;
   share_community: boolean;
+  // model_cache_gb caps the model cache; 0 means no limit.
+  model_cache_gb: number;
 }

@@ -54,6 +54,10 @@ type Config struct {
 	// other people, as well as its owner's own Zones. Off unless the
 	// contributor turns it on.
 	ShareCommunity bool `json:"share_community"`
+	// ModelCacheGB caps how much disk the downloaded model weights may use;
+	// past it the least recently used models not in use are removed. Zero
+	// means no limit.
+	ModelCacheGB int `json:"model_cache_gb"`
 }
 
 var writeMu sync.Mutex
@@ -64,6 +68,10 @@ const (
 	DefaultIdleMinutes = 5
 	MaxIdleMinutes     = 120
 )
+
+// DefaultModelCacheGB is the model cache cap of a new install, and of a
+// config from before the setting existed.
+const DefaultModelCacheGB = 20
 
 // Dir returns the node's config directory, creating it if needed. It is
 // ~/.zonn (moved there from ~/.colony on first start after an upgrade), but
@@ -118,6 +126,7 @@ func Default() Config {
 		IdleMinutes:         DefaultIdleMinutes,
 		AutoStart:           false,
 		CrashReportsEnabled: true,
+		ModelCacheGB:        DefaultModelCacheGB,
 	}
 }
 
@@ -176,6 +185,10 @@ func Load() (Config, error) {
 	}
 	if cfg.IdleMinutes <= 0 {
 		cfg.IdleMinutes = DefaultIdleMinutes
+		rewrite = true
+	}
+	if _, ok := present["model_cache_gb"]; !ok {
+		cfg.ModelCacheGB = DefaultModelCacheGB
 		rewrite = true
 	}
 	// Backfill a stable id for configs written before it existed.

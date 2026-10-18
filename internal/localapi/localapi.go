@@ -49,6 +49,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/report", s.handleReport)
 	mux.HandleFunc("/api/enroll", s.handleEnroll)
 	mux.HandleFunc("/api/update", s.handleUpdate)
+	mux.HandleFunc("/api/cache", s.handleCache)
 	return localOnly(mux)
 }
 
@@ -108,6 +109,28 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.daemon.Snapshot().Update)
+}
+
+// handleCache shows the model cache (GET) or clears it (POST with action
+// "clear"), keeping every model a running stage needs.
+func (s *Server) handleCache(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+	case http.MethodPost:
+		var req struct {
+			Action string `json:"action"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Action != "clear" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "action must be clear"})
+			return
+		}
+		s.daemon.ClearCache()
+	default:
+		w.Header().Set("Allow", "GET, POST")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.daemon.Snapshot().ModelCache)
 }
 
 // ListenAndServe starts the server and blocks.

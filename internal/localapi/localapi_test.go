@@ -1,9 +1,16 @@
 package localapi
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/zonnhq/node-gui/internal/config"
+	"github.com/zonnhq/node-gui/internal/daemon"
 )
 
 func TestOnlyTheAppItselfMayCallTheLocalAPI(t *testing.T) {
@@ -47,5 +54,36 @@ func TestOnlyTheAppItselfMayCallTheLocalAPI(t *testing.T) {
 func TestBarePortBindsToLoopback(t *testing.T) {
 	if s := New(nil, ":9090"); s.addr != "127.0.0.1:9090" {
 		t.Fatalf("bound to %s", s.addr)
+	}
+}
+
+func TestTheCacheCanBeReadAndCleared(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("ZONN_HOME", home)
+	t.Setenv("ZONN_MODEL_CACHE", "")
+	cfg := config.Default()
+	cfg.Configured = true
+	d := daemon.New(cfg)
+	blobs := filepath.Join(home, "models", "models--org--m", "blobs")
+	os.MkdirAll(blobs, 0o755)
+	os.WriteFile(filepath.Join(blobs, "w"), make([]byte, 1000), 0o644)
+	h := New(d, ":0").Handler()
+	call := func(method, body string) (int, daemon.CacheState) {
+		req := httptest.NewRequest(method, "http://127.0.0.1:9090/api/cache", strings.NewReader(body))
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		var st daemon.CacheState
+		json.NewDecoder(rec.Body).Decode(&st)
+		return rec.Code, st
+	}
+	if code, _ := call(http.MethodPost, `{"action":"wipe"}`); code != 400 {
+		t.Fatalf("unknown action: %d", code)
+	}
+	code, st := call(http.MethodPost, `{"action":"clear"}`)
+	if code != 200 || len(st.Models) != 0 || st.CapGB != config.DefaultModelCacheGB {
+		t.Fatalf("clear: %d %+v", code, st)
+	}
+	if _, err := os.Stat(blobs); !os.IsNotExist(err) {
+		t.Fatal("the model is still on disk")
 	}
 }

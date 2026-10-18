@@ -5,10 +5,12 @@
 package worker
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"os/exec"
@@ -21,6 +23,7 @@ import (
 	"github.com/shirou/gopsutil/v3/process"
 
 	"github.com/zonnhq/node-gui/internal/config"
+	"github.com/zonnhq/node-gui/internal/modelcache"
 )
 
 const bytesPerGB = 1024 * 1024 * 1024
@@ -171,12 +174,27 @@ type Usage struct {
 	RAMGB    float64
 }
 
+// Download is how far a worker's download of model weights is, in bytes.
+type Download struct {
+	Model string `json:"model"`
+	Done  int64  `json:"done"`
+	Total int64  `json:"total"`
+}
+
+// downloadPrefix starts the line a worker prints to report download
+// progress, followed by a Download as JSON.
+const downloadPrefix = "ZONN_DOWNLOAD "
+
+// keptLines is how much of a worker's output is kept to explain a failure.
+const keptLines = 50
+
 // Launch runs the worker for one job and blocks until it exits. Output is passed
-// to logfn line by line. While the worker runs, sampleFn is called about once a
+// to logfn line by line as it is printed, except download progress, which goes
+// to downloadFn. While the worker runs, sampleFn is called about once a
 // second with the process's live CPU and memory draw, so the node can show what
 // of the contribution the Zone is using; it is called with a zero Usage once
-// the worker exits. sampleFn may be nil.
-func Launch(ctx context.Context, cmd Command, coordinatorHost string, logfn func(level, message string), sampleFn func(Usage)) error {
+// the worker exits. sampleFn and downloadFn may be nil.
+func Launch(ctx context.Context, cmd Command, coordinatorHost string, logfn func(level, message string), sampleFn func(Usage), downloadFn func(Download)) error {
 	relayPath := cmd.RelayPath
 	if relayPath == "" {
 		relayPath = "/relay"
@@ -189,25 +207,43 @@ func Launch(ctx context.Context, cmd Command, coordinatorHost string, logfn func
 	args := workerArgs(cmd, wsURL)
 	logfn("INFO", fmt.Sprintf("Starting the stage %d of %d worker for Zone deployment %s", cmd.Stage+1, cmd.Stages, cmd.DeploymentID))
 
-	var out bytes.Buffer
 	program, prefixArgs, err := workerCommand(cmd.Engine)
 	if err != nil {
 		return err
 	}
+	cacheDir, err := modelcache.Dir()
+	if err != nil {
+		return fmt.Errorf("model cache folder: %w", err)
+	}
 	proc := exec.CommandContext(ctx, program, append(prefixArgs, args...)...)
 	// The relay token goes through the environment, not the command line, so
-	// other users on the machine cannot read it from the process list.
+	// other users on the machine cannot read it from the process list. Model
+	// weights go to Zonn Node's own cache, which it keeps under the cap.
 	proc.Env = append(os.Environ(),
 		"HF_HUB_DISABLE_SYMLINKS_WARNING=1",
 		"HF_HUB_DISABLE_XET=1",
+		"HF_HUB_DISABLE_PROGRESS_BARS=1",
+		"HF_HUB_CACHE="+cacheDir,
 		"ZONN_RELAY_TOKEN="+cmd.RelayToken,
 	)
-	proc.Stdout = &out
-	proc.Stderr = &out
-	setParentDeathSignal(proc)
-	if err := proc.Start(); err != nil {
+	output, writer, err := os.Pipe()
+	if err != nil {
 		return fmt.Errorf("start worker: %w", err)
 	}
+	proc.Stdout = writer
+	proc.Stderr = writer
+	setParentDeathSignal(proc)
+	if err := proc.Start(); err != nil {
+		writer.Close()
+		output.Close()
+		return fmt.Errorf("start worker: %w", err)
+	}
+	writer.Close() // the worker holds its own copy
+	tail := make(chan []string, 1)
+	go func() {
+		tail <- readOutput(output, logfn, downloadFn)
+		output.Close()
+	}()
 
 	// Sample the worker's usage until it exits, then reset to zero.
 	done := make(chan struct{})
@@ -220,16 +256,10 @@ func Launch(ctx context.Context, cmd Command, coordinatorHost string, logfn func
 	if sampleFn != nil {
 		sampleFn(Usage{})
 	}
-
-	// out is only written by the process, and it has now exited, so reading it
-	// here is race free.
-	for _, line := range strings.Split(strings.TrimRight(out.String(), "\n"), "\n") {
-		if strings.TrimSpace(line) != "" {
-			logfn("INFO", "worker: "+line)
-		}
-	}
+	// The pipe ends when the worker and anything it started have exited.
+	lines := <-tail
 	if waitErr != nil {
-		detail := lastWorkerError(out.String())
+		detail := lastWorkerError(strings.Join(lines, "\n"))
 		if detail != "" {
 			return fmt.Errorf("worker exited: %w: %s", waitErr, detail)
 		}
@@ -237,6 +267,47 @@ func Launch(ctx context.Context, cmd Command, coordinatorHost string, logfn func
 	}
 	logfn("INFO", fmt.Sprintf("Worker for Zone deployment %s finished", cmd.DeploymentID))
 	return nil
+}
+
+// readOutput passes a worker's output to logfn line by line as it arrives,
+// and its download reports to downloadFn, until the output ends. It returns
+// the last lines, to explain a failure.
+func readOutput(r io.Reader, logfn func(level, message string), downloadFn func(Download)) []string {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	scanner.Split(splitLines)
+	var last []string
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		if report, ok := strings.CutPrefix(line, downloadPrefix); ok {
+			var d Download
+			if json.Unmarshal([]byte(report), &d) == nil && downloadFn != nil {
+				downloadFn(d)
+			}
+			continue
+		}
+		logfn("INFO", "worker: "+line)
+		last = append(last, line)
+		if len(last) > keptLines {
+			last = last[1:]
+		}
+	}
+	return last
+}
+
+// splitLines splits at a newline or a carriage return, so a progress bar
+// that redraws itself with carriage returns still arrives line by line.
+func splitLines(data []byte, atEOF bool) (int, []byte, error) {
+	if i := bytes.IndexAny(data, "\r\n"); i >= 0 {
+		return i + 1, data[:i], nil
+	}
+	if atEOF && len(data) > 0 {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
 }
 
 func workerArgs(cmd Command, wsURL string) []string {

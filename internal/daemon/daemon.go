@@ -20,6 +20,7 @@ import (
 	"github.com/zonnhq/node-gui/internal/client"
 	"github.com/zonnhq/node-gui/internal/config"
 	"github.com/zonnhq/node-gui/internal/idle"
+	"github.com/zonnhq/node-gui/internal/modelcache"
 	"github.com/zonnhq/node-gui/internal/resources"
 	"github.com/zonnhq/node-gui/internal/version"
 	"github.com/zonnhq/node-gui/internal/worker"
@@ -101,6 +102,18 @@ type State struct {
 	Desktop bool `json:"desktop"`
 	// Update is a newer Zonn Node, when one is published.
 	Update UpdateState `json:"update"`
+	// Downloads are the model weights stage workers are downloading now.
+	Downloads []worker.Download `json:"downloads"`
+	// ModelCache is what the downloaded models take on disk.
+	ModelCache CacheState `json:"model_cache"`
+}
+
+// CacheState describes the model cache: its folder, cap, and models.
+type CacheState struct {
+	Dir    string             `json:"dir"`
+	CapGB  int                `json:"cap_gb"` // zero means no limit
+	Bytes  int64              `json:"bytes"`
+	Models []modelcache.Model `json:"models"`
 }
 
 // Daemon holds the mutable state behind a mutex.
@@ -134,6 +147,10 @@ type Daemon struct {
 	desktop     bool
 	onConfig    []func(config.Config)
 	update      UpdateState
+	// cache is the model cache (nil when its folder cannot be made), and
+	// cacheState its last scan, refreshed whenever it may have changed.
+	cache      *modelcache.Cache
+	cacheState CacheState
 
 	reconnect chan struct{}
 }
@@ -209,8 +226,10 @@ func (d *Daemon) watchIdle(ctx context.Context) {
 
 // runningWorker is one stage worker this node is running for a Zone.
 type runningWorker struct {
-	cancel context.CancelFunc
-	usage  worker.Usage
+	cancel   context.CancelFunc
+	usage    worker.Usage
+	model    string           // the model it serves, kept in the cache while it runs
+	download *worker.Download // its download in progress, if any
 }
 
 // gpuWarnTempC is the GPU temperature above which the node warns the operator.
@@ -239,6 +258,11 @@ func New(cfg config.Config) *Daemon {
 	}
 	if creds, ok := config.LoadCredentials(); ok {
 		d.creds = &creds
+	}
+	if dir, err := modelcache.Dir(); err == nil {
+		d.cache = modelcache.New(dir)
+	} else {
+		d.log("WARN", "Could not make the model cache folder: "+err.Error())
 	}
 	d.log("INFO", "Detected "+specs.OS+" with "+humanSpecs(specs))
 	if seeded {
@@ -286,6 +310,26 @@ func (d *Daemon) Snapshot() State {
 	for i, e := range d.events {
 		events[len(d.events)-1-i] = e
 	}
+	// Stages of one model share its download in the cache, so it is shown
+	// once, at the furthest any of them has seen.
+	downloads := []worker.Download{}
+	seen := map[string]int{}
+	for _, w := range d.workers {
+		if w.download == nil {
+			continue
+		}
+		if i, ok := seen[w.download.Model]; ok {
+			if w.download.Done > downloads[i].Done {
+				downloads[i] = *w.download
+			}
+			continue
+		}
+		seen[w.download.Model] = len(downloads)
+		downloads = append(downloads, *w.download)
+	}
+	cacheState := d.cacheState
+	cacheState.CapGB = d.cfg.ModelCacheGB
+	cacheState.Models = append([]modelcache.Model{}, d.cacheState.Models...)
 	status := "OFFLINE"
 	if d.connection == Connected {
 		status = "ONLINE"
@@ -315,6 +359,8 @@ func (d *Daemon) Snapshot() State {
 		IdleNote:       d.idleNote,
 		Desktop:        d.desktop,
 		Update:         d.update,
+		Downloads:      downloads,
+		ModelCache:     cacheState,
 	}
 }
 
@@ -380,6 +426,10 @@ func (d *Daemon) Enroll(ctx context.Context, code string) error {
 func (d *Daemon) UpdateConfig(newCfg config.Config) error {
 	d.mu.Lock()
 	newCfg.Allocation = clampAllocation(newCfg.Allocation, d.specs)
+	if newCfg.ModelCacheGB < 0 {
+		newCfg.ModelCacheGB = 0
+	}
+	capChanged := newCfg.ModelCacheGB != d.cfg.ModelCacheGB
 	if newCfg.NodeName == "" {
 		newCfg.NodeName = d.cfg.NodeName
 	}
@@ -401,6 +451,9 @@ func (d *Daemon) UpdateConfig(newCfg config.Config) error {
 	}
 	d.log("INFO", "Settings updated, applying the changes")
 	d.checkIdle()
+	if capChanged {
+		d.fitCache()
+	}
 	for _, fn := range hooks {
 		fn(newCfg)
 	}
@@ -426,6 +479,7 @@ func (d *Daemon) Run(ctx context.Context) {
 	d.checkIdle()
 	go d.watchIdle(ctx)
 	go d.watchUpdates(ctx)
+	go d.watchCache(ctx)
 	backoff := minBackoff
 	for {
 		if ctx.Err() != nil {
@@ -747,7 +801,7 @@ func (d *Daemon) handleCommand(ctx context.Context, raw string) {
 		cancel()
 		return
 	}
-	d.workers[key] = &runningWorker{cancel: cancel}
+	d.workers[key] = &runningWorker{cancel: cancel, model: cmd.Model}
 	host := coordinatorHost(d.cfg.CoordinatorURL)
 	d.mu.Unlock()
 
@@ -765,11 +819,38 @@ func (d *Daemon) runWorker(ctx context.Context, key string, cmd worker.Command, 
 		}
 		d.mu.Unlock()
 	}
-	err := worker.Launch(ctx, cmd, host, d.log, sample)
+	download := func(p worker.Download) {
+		finished := p.Done >= p.Total
+		d.mu.Lock()
+		if w := d.workers[key]; w != nil {
+			started := w.download == nil
+			w.download = &p
+			if finished {
+				w.download = nil
+			}
+			if started && !finished {
+				defer d.log("INFO", fmt.Sprintf("Downloading %s of %s for a Zone", megabytes(p.Total), p.Model))
+			}
+		}
+		d.mu.Unlock()
+		if finished {
+			d.log("INFO", "Downloaded "+p.Model)
+			d.fitCache()
+		}
+	}
+	if d.cache != nil && cmd.Engine == "real" {
+		d.cache.Touch(cmd.Model, time.Now())
+		d.fitCache() // make room before this stage downloads anything
+	}
+	err := worker.Launch(ctx, cmd, host, d.log, sample, download)
 
 	d.mu.Lock()
 	delete(d.workers, key)
 	d.mu.Unlock()
+	if d.cache != nil && cmd.Engine == "real" {
+		d.cache.Touch(cmd.Model, time.Now())
+		d.fitCache()
+	}
 
 	switch {
 	case ctx.Err() != nil:
