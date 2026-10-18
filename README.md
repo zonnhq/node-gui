@@ -99,8 +99,11 @@ behind the desktop tag, which would otherwise fail binding generation. Use
 
 Installers bundle a native `inference-worker` containing Python, numpy, CPU
 PyTorch, and Transformers for both mock and real Playground runs, so contributors
-install no language runtime or dependencies. Models download on first use and are
-then read from the local Hugging Face cache. A source or custom deployment can put that
+install no language runtime or dependencies. Models download on first use, with
+progress in the window, into Zonn Node's own cache (`~/.zonn/models`, or
+`ZONN_MODEL_CACHE`), which it keeps under the limit set in Settings by
+removing the least recently used models no running stage needs; it never
+touches the user's own Hugging Face cache. A source or custom deployment can put that
 script in `~/.zonn/` or set `ZONN_WORKER_SCRIPT`.
 
 Install candidates are a Windows Setup `.exe`, an Ubuntu `.deb`, and a macOS
