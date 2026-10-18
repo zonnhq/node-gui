@@ -146,7 +146,7 @@ type Colony struct {
 }
 
 // Register brings this enrolled node online with its current settings.
-func (c *Client) Register(ctx context.Context, nodeID string, cfg config.Config, specs resources.Specs, fingerprint, accelerator string) (RegisterResult, error) {
+func (c *Client) Register(ctx context.Context, nodeID string, cfg config.Config, specs resources.Specs, fingerprint, accelerator string, features []string) (RegisterResult, error) {
 	resp, err := c.svc.Register(ctx, &colonyv1.RegisterRequest{
 		NodeId:         nodeID,
 		Name:           cfg.NodeName,
@@ -158,6 +158,7 @@ func (c *Client) Register(ctx context.Context, nodeID string, cfg config.Config,
 		Allocated:      allocationToProto(cfg.Allocation),
 		ShareCommunity: cfg.ShareCommunity,
 		Accelerator:    accelerator,
+		RunnerFeatures: features,
 	})
 	if err != nil {
 		return RegisterResult{}, err

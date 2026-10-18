@@ -139,6 +139,14 @@ window, all verified live against the backend.
   freedesktop screensaver service over D-Bus, or `xprintidle`. Where none is
   available the node does not contribute and says why.
 
+## Quantized stages
+
+At start the node asks the bundled runtime what it supports (`--probe`) and
+tells the backend, which can then give this machine stages whose layers are
+held as int8 or 4 bit, so a Zone of small machines can run a larger model. The
+runtime quantizes the weights itself as it loads them; nothing else is
+downloaded.
+
 ## Community sharing
 
 Off by default. When on, the backend may also place the machine in community

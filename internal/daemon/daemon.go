@@ -147,6 +147,9 @@ type Daemon struct {
 	// accelerator is what the inference runtime can drive (cuda or mps),
 	// learned once by probing it in the background; empty means CPU only.
 	accelerator string
+	// features is what else the runtime supports (int8 and int4 quantized
+	// stages), from the same probe.
+	features []string
 
 	// idleSource reads the owner's idle time; idleBlocked is set while Only
 	// when idle holds the node back, with idleNote saying why.
@@ -542,9 +545,17 @@ func (d *Daemon) probeAccelerator(ctx context.Context) {
 		d.log("WARN", "Could not check the inference runtime for a usable GPU: "+err.Error())
 		return
 	}
+	if len(acc.Features) > 0 {
+		d.mu.Lock()
+		d.features = acc.Features
+		d.mu.Unlock()
+	}
 	if acc.Device != "cuda" && acc.Device != "mps" {
 		if d.Specs().GPUModel != "" {
 			d.log("INFO", "The GPU is not usable by this build of the inference runtime, so Zones use the CPU")
+		}
+		if len(acc.Features) > 0 {
+			d.triggerReconnect() // register again with what the runtime supports
 		}
 		return
 	}
@@ -654,9 +665,9 @@ func (d *Daemon) connectOnce(ctx context.Context) bool {
 
 	regCtx, cancel := context.WithTimeout(ctx, registerTTL)
 	d.mu.RLock()
-	accelerator := d.accelerator
+	accelerator, features := d.accelerator, d.features
 	d.mu.RUnlock()
-	res, err := cli.Register(regCtx, creds.NodeID, cfg, d.Specs(), d.fingerprint, accelerator)
+	res, err := cli.Register(regCtx, creds.NodeID, cfg, d.Specs(), d.fingerprint, accelerator, features)
 	cancel()
 	if err != nil {
 		switch status.Code(err) {

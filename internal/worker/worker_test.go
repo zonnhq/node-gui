@@ -171,6 +171,18 @@ func TestWorkerArgsCarryTheStageAndNeverAPrompt(t *testing.T) {
 	}
 }
 
+func TestWorkerArgsAskForQuantizedLayersOnlyWhenPlanned(t *testing.T) {
+	if args := strings.Join(workerArgs(Command{Stages: 2, Engine: "real", Model: "m"}, "ws://x"), " "); strings.Contains(args, "--quantize") {
+		t.Fatalf("full precision asked for quantization: %s", args)
+	}
+	if args := strings.Join(workerArgs(Command{Stages: 2, Engine: "real", Model: "m", Quantization: "int4"}, "ws://x"), " "); !strings.HasSuffix(args, "--quantize int4") {
+		t.Fatalf("4 bit: %s", args)
+	}
+	if args := strings.Join(workerArgs(Command{Stages: 2, Engine: "real", Model: "m", Quantization: "int2; rm"}, "ws://x"), " "); strings.Contains(args, "--quantize") {
+		t.Fatalf("an unknown quantization was passed on: %s", args)
+	}
+}
+
 func TestBundledWorkerFindsTheNvidiaFolderLayout(t *testing.T) {
 	dir := t.TempDir()
 	exe := filepath.Join(dir, "zonn-node")

@@ -86,6 +86,10 @@ message RegisterRequest {
   // The accelerator the node's inference runtime can use: "cuda", "mps", or
   // empty for CPU only. A GPU the runtime cannot drive is not reported.
   string accelerator = 10;
+  // What the node's inference runtime supports beyond the basics, from its
+  // probe: "int8" and "int4" for quantized stages. Older nodes send nothing
+  // and are only given full precision stages.
+  repeated string runner_features = 11;
 }
 
 message EnrollRequest {

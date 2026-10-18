@@ -40,10 +40,13 @@ type Command struct {
 	Revision     string  `json:"model_revision"` // pinned catalog revision
 	Engine       string  `json:"engine"`
 	Device       string  `json:"device"` // cpu, or auto to use the GPU
-	RelayPort    string  `json:"relay_port"`
-	RelayPath    string  `json:"relay_path"`
-	RelayURL     string  `json:"relay_url"`
-	RelayToken   string  `json:"relay_token"`
+	// Quantization loads the stage's layers as int8 or int4; empty is full
+	// precision.
+	Quantization string `json:"quantization"`
+	RelayPort    string `json:"relay_port"`
+	RelayPath    string `json:"relay_path"`
+	RelayURL     string `json:"relay_url"`
+	RelayToken   string `json:"relay_token"`
 }
 
 // scriptPath resolves the worker script from an explicit override, the node's
@@ -328,6 +331,9 @@ func workerArgs(cmd Command, wsURL string) []string {
 		device = "cpu" // the GPU is used only when the Coordinator planned for it
 	}
 	args = append(args, "--device", device)
+	if cmd.Quantization == "int8" || cmd.Quantization == "int4" {
+		args = append(args, "--quantize", cmd.Quantization)
+	}
 	return args
 }
 
@@ -337,6 +343,9 @@ type Accelerator struct {
 	Name     string  `json:"name"`
 	MemoryGB float64 `json:"memory_gb"`
 	Error    string  `json:"error"`
+	// Features lists what else the runtime supports, such as "int8" and
+	// "int4" quantized stages; older runtimes report none.
+	Features []string `json:"features"`
 }
 
 // Probe asks the worker runtime which accelerator it can use. Importing torch
