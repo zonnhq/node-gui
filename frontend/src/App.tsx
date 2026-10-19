@@ -1,8 +1,5 @@
 import { useEffect, useState } from "react";
 import {
-  RadialBar,
-  RadialBarChart,
-  PolarAngleAxis,
   ResponsiveContainer,
   AreaChart,
   Area,
@@ -13,6 +10,7 @@ import {
 } from "recharts";
 import { clearCache, enroll, fetchState, fetchConfig, saveConfig, updateAction } from "./api";
 import type { Allocation, Config, Download, State, UpdateState } from "./types";
+import mark from "./assets/zonn-mark.png";
 
 type Tab = "overview" | "analytics" | "settings" | "activity";
 
@@ -64,144 +62,218 @@ export default function App() {
     };
   }, []);
 
+  const titles: Record<Tab, [string, string]> = {
+    overview: ["Overview", "What this machine is doing for its Zone right now."],
+    analytics: ["Analytics", "Live load over the last minutes and how this machine compares."],
+    settings: ["Settings", "What this machine lends, when, and to whom."],
+    activity: ["Activity", "Everything the node has done, newest last."],
+  };
+
   return (
-    <div className="min-h-screen bg-colony-cloud text-colony-charcoal">
-      <Header state={state} reachable={reachable} />
-      <Tabs tab={tab} setTab={setTab} />
-      <main className="mx-auto max-w-5xl px-6 py-6">
-        {!reachable && <Banner text="Cannot reach the local node service on port 9090. Is the node running?" />}
-        {reachable && !state && <Banner text="Starting up..." />}
-        {state && state.update?.available ? (
-          <UpdatePanel update={state.update} />
-        ) : (
-          state &&
-          state.connection === "UPDATE_REQUIRED" && (
-            <div className="mb-4">
-              <Banner text={state.notice || "This Zone needs a newer Zonn Node. Install the latest version."} />
+    <div className="min-h-screen bg-colony-black text-colony-cloud">
+      <Sidebar tab={tab} setTab={setTab} state={state} reachable={reachable} />
+      <TopBar tab={tab} setTab={setTab} state={state} reachable={reachable} />
+      <div className="md:pl-60">
+        <main className="relative mx-auto max-w-5xl px-4 pb-12 pt-6 sm:px-6 md:pt-8">
+          <div className="pointer-events-none absolute inset-x-0 top-0 h-60 bg-[radial-gradient(ellipse_60%_100%_at_50%_0%,rgba(26,23,32,0.8),rgba(2,3,1,0))]" aria-hidden="true" />
+          <div className="relative space-y-4">
+            <div className="mb-2">
+              <h1 className="text-2xl font-bold tracking-tight text-colony-cloud">{titles[tab][0]}</h1>
+              <p className="mt-1 text-sm text-colony-mist">{titles[tab][1]}</p>
             </div>
-          )
-        )}
-        {state && state.connection === "DISCONNECTED" && state.notice && (
-          <div className="mb-4">
-            <Banner text={state.notice} />
+            {!reachable && <Banner text="Cannot reach the local node service on port 9090. Is the node running?" />}
+            {reachable && !state && <Banner text="Starting up..." />}
+            {state && state.update?.available ? (
+              <UpdatePanel update={state.update} />
+            ) : (
+              state &&
+              state.connection === "UPDATE_REQUIRED" && <Banner text={state.notice || "This Zone needs a newer Zonn Node. Install the latest version."} />
+            )}
+            {state && state.connection === "DISCONNECTED" && state.notice && <Banner text={state.notice} />}
+            {state && state.waiting_for_idle && <Banner text={state.idle_note || "Waiting until you are away (Only when idle is on)."} />}
+            {state && !state.enrolled && <EnrollPanel state={state} />}
+            {state && tab === "overview" && <Overview state={state} />}
+            {state && tab === "analytics" && <Analytics state={state} history={history} />}
+            {state && tab === "settings" && <Settings state={state} />}
+            {state && tab === "activity" && <Activity state={state} />}
           </div>
-        )}
-        {state && state.waiting_for_idle && (
-          <div className="mb-4">
-            <Banner text={state.idle_note || "Waiting until you are away (Only when idle is on)."} />
-          </div>
-        )}
-        {state && !state.enrolled && <EnrollPanel state={state} />}
-        {state && tab === "overview" && <Overview state={state} />}
-        {state && tab === "analytics" && <Analytics state={state} history={history} />}
-        {state && tab === "settings" && <Settings state={state} />}
-        {state && tab === "activity" && <Activity state={state} />}
-      </main>
+        </main>
+      </div>
     </div>
   );
 }
 
-function Header({ state, reachable }: { state: State | null; reachable: boolean }) {
-  const online = reachable && state?.status === "ONLINE";
-  const paused = reachable && state?.available === false;
+const TABS: { key: Tab; label: string; icon: string }[] = [
+  { key: "overview", label: "Overview", icon: "M4 11l8-7 8 7v8a1 1 0 0 1-1 1h-4v-6h-6v6H5a1 1 0 0 1-1-1v-8z" },
+  { key: "analytics", label: "Analytics", icon: "M3 12h4l2-6 4 12 2-6h6" },
+  { key: "settings", label: "Settings", icon: "M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0M16 4v4M10 10v4M18 16v4" },
+  { key: "activity", label: "Activity", icon: "M6 3h8l4 4v14H6V3zM9 12h6M9 16h6" },
+];
+
+function NavIcon({ d }: { d: string }) {
   return (
-    <header className="bg-colony-navy px-6 py-4">
-      <div className="mx-auto flex max-w-5xl items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="h-8 w-8 rounded-md bg-colony-core" />
-          <div>
-            <div className="text-lg font-semibold text-colony-cloud">Zonn</div>
-            <div className="text-xs text-colony-ice">One Zone. Infinite Compute.</div>
-          </div>
-        </div>
-        <div className="flex items-center gap-4">
-          <div className="text-right">
-            <div className="text-sm font-medium text-colony-cloud">{state?.node_name ?? "..."}</div>
-            <div className="font-mono text-xs text-colony-mist">{state?.coordinator_url ?? ""}</div>
-          </div>
-          <StatusPill
-            online={online}
-            paused={paused}
-            waiting={reachable && !!state?.waiting_for_idle}
-            connection={state?.connection ?? "DISCONNECTED"}
-          />
-        </div>
-      </div>
-    </header>
+    <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d={d} />
+    </svg>
   );
 }
 
-function StatusPill({
-  online,
-  paused,
-  waiting,
-  connection,
-}: {
-  online: boolean;
-  paused: boolean;
-  waiting: boolean;
-  connection: string;
-}) {
-  // The palette carries no red or green, so status is icon plus label plus the
-  // active/offline tones from the Drapery Drama palette (see blueprint.md 8.1),
-  // never color alone.
-  const label = paused
-    ? "Paused"
-    : waiting
-      ? "Waiting for idle"
-    : online
-      ? "Online"
-      : connection === "CONNECTING"
-        ? "Connecting"
-        : connection === "UNENROLLED"
-          ? "Not enrolled"
-          : connection === "UPDATE_REQUIRED"
-            ? "Update required"
-            : "Offline";
-  const cls = online ? "bg-colony-ice text-colony-midnight" : "bg-colony-mist text-colony-navy";
-  const dot = online ? "bg-colony-deep" : "bg-colony-slate";
+function Brand() {
   return (
-    <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-medium ${cls}`}>
-      {paused || waiting ? <PauseGlyph /> : <span className={`h-2 w-2 rounded-full ${dot}`} />}
-      {label}
+    <div className="flex items-center gap-2.5">
+      <img src={mark} alt="" width={30} height={30} className="h-[30px] w-[30px]" />
+      <div>
+        <div className="text-base font-bold leading-none tracking-[0.28em] text-colony-cloud">ZONN</div>
+        <div className="mt-1 text-[9px] uppercase tracking-[0.22em] text-colony-grayblue">Node</div>
+      </div>
+    </div>
+  );
+}
+
+// statusOf names the node's state in words, with a tone and whether it is live.
+function statusOf(state: State | null, reachable: boolean) {
+  if (!reachable) return { label: "Service not running", live: false, paused: false };
+  if (!state) return { label: "Starting", live: false, paused: false };
+  if (state.available === false) return { label: "Paused", live: false, paused: true };
+  if (state.waiting_for_idle) return { label: "Waiting for idle", live: false, paused: true };
+  if (state.status === "ONLINE") return { label: state.colony_usage?.active ? "Working for a Zone" : "Online", live: true, paused: false };
+  const byConn: Record<string, string> = { CONNECTING: "Connecting", UNENROLLED: "Not enrolled", UPDATE_REQUIRED: "Update required" };
+  return { label: byConn[state.connection] ?? "Offline", live: false, paused: false };
+}
+
+function StatusPill({ state, reachable }: { state: State | null; reachable: boolean }) {
+  const st = statusOf(state, reachable);
+  return (
+    <span
+      className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium ${
+        st.live ? "border-colony-midblue bg-colony-navy text-colony-ice" : "border-colony-deep bg-colony-black text-colony-mist"
+      }`}
+    >
+      {st.paused ? (
+        <PauseGlyph />
+      ) : st.live ? (
+        <span className="relative flex h-2 w-2" aria-hidden="true">
+          <span className="absolute inline-flex h-full w-full rounded-full bg-colony-ice opacity-60 [animation:zonn-ping_1.6s_cubic-bezier(0,0,0.2,1)_infinite]" />
+          <span className="relative h-2 w-2 rounded-full bg-colony-ice" />
+        </span>
+      ) : (
+        <span className="h-2 w-2 rounded-full border border-colony-mist" aria-hidden="true" />
+      )}
+      {st.label}
     </span>
   );
 }
 
 function PauseGlyph() {
   return (
-    <span className="inline-flex gap-[2px]">
-      <span className="h-2 w-[3px] rounded-sm bg-colony-slate" />
-      <span className="h-2 w-[3px] rounded-sm bg-colony-slate" />
+    <span className="inline-flex gap-[2px]" aria-hidden="true">
+      <span className="h-2 w-[3px] rounded-sm bg-colony-mist" />
+      <span className="h-2 w-[3px] rounded-sm bg-colony-mist" />
     </span>
   );
 }
 
-function Tabs({ tab, setTab }: { tab: Tab; setTab: (t: Tab) => void }) {
-  const items: { key: Tab; label: string }[] = [
-    { key: "overview", label: "Overview" },
-    { key: "analytics", label: "Analytics" },
-    { key: "settings", label: "Settings" },
-    { key: "activity", label: "Activity" },
-  ];
+// PauseButton is the contributor's one click stop: it flips availability at
+// once, the same switch as in Settings.
+function PauseButton({ state, wide = false }: { state: State; wide?: boolean }) {
+  const [busy, setBusy] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const flip = async () => {
+    setBusy(true);
+    setFailed(false);
+    try {
+      const cfg = await fetchConfig();
+      await saveConfig({ ...cfg, available: !cfg.available });
+    } catch {
+      setFailed(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const paused = state.available === false;
   return (
-    <nav className="border-b border-colony-mist bg-colony-nearwhite px-6">
-      <div className="mx-auto flex max-w-5xl gap-1">
-        {items.map((it) => (
+    <div>
+      <button
+        type="button"
+        onClick={flip}
+        disabled={busy || !state.enrolled}
+        className={`inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors disabled:opacity-50 ${wide ? "w-full" : ""} ${
+          paused ? "bg-colony-ice text-colony-black hover:bg-colony-vibrant" : "border border-colony-deep text-colony-cloud hover:border-colony-midblue hover:bg-colony-navy"
+        }`}
+      >
+        {paused ? (
+          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="currentColor" aria-hidden="true"><path d="M7 5l12 7-12 7V5z" /></svg>
+        ) : (
+          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M9 6v12M15 6v12" /></svg>
+        )}
+        {busy ? "Applying..." : paused ? (wide ? "Resume" : "Resume contributing") : wide ? "Pause" : "Pause contributing"}
+      </button>
+      {failed && <p className="mt-1 text-xs text-colony-warmbeige">Could not apply that. Is the node running?</p>}
+    </div>
+  );
+}
+
+function Sidebar({ tab, setTab, state, reachable }: { tab: Tab; setTab: (t: Tab) => void; state: State | null; reachable: boolean }) {
+  return (
+    <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r border-colony-navy bg-colony-midnight md:flex">
+      <div className="flex h-16 items-center px-5">
+        <Brand />
+      </div>
+      <nav aria-label="Zonn Node" className="flex-1 space-y-0.5 px-3 py-2">
+        {TABS.map((t) => {
+          const active = tab === t.key;
+          return (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setTab(t.key)}
+              aria-current={active ? "page" : undefined}
+              className={`relative flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
+                active ? "bg-colony-navy text-colony-ice" : "text-colony-mist hover:bg-colony-navy/60 hover:text-colony-cloud"
+              }`}
+            >
+              {active && <span className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-colony-ice" aria-hidden="true" />}
+              <NavIcon d={t.icon} />
+              {t.label}
+            </button>
+          );
+        })}
+      </nav>
+      <div className="space-y-3 border-t border-colony-navy p-4">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-medium text-colony-cloud">{state?.node_name ?? "..."}</div>
+          <div className="truncate font-mono text-[11px] text-colony-grayblue">{state?.coordinator_url ?? ""}</div>
+        </div>
+        <StatusPill state={state} reachable={reachable} />
+        {state && <PauseButton state={state} wide />}
+        {state?.app_version && <div className="text-[10px] text-colony-grayblue">Zonn Node {state.app_version}</div>}
+      </div>
+    </aside>
+  );
+}
+
+function TopBar({ tab, setTab, state, reachable }: { tab: Tab; setTab: (t: Tab) => void; state: State | null; reachable: boolean }) {
+  return (
+    <header className="sticky top-0 z-30 border-b border-colony-navy bg-colony-black/95 backdrop-blur md:hidden">
+      <div className="flex h-14 items-center justify-between px-4">
+        <Brand />
+        <StatusPill state={state} reachable={reachable} />
+      </div>
+      <nav aria-label="Zonn Node" className="flex gap-1 overflow-x-auto px-3 pb-2">
+        {TABS.map((t) => (
           <button
-            key={it.key}
-            onClick={() => setTab(it.key)}
-            className={`border-b-2 px-4 py-3 text-sm font-medium ${
-              tab === it.key
-                ? "border-colony-core text-colony-core"
-                : "border-transparent text-colony-slate hover:text-colony-charcoal"
-            }`}
+            key={t.key}
+            type="button"
+            onClick={() => setTab(t.key)}
+            aria-current={tab === t.key ? "page" : undefined}
+            className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-1.5 text-xs ${tab === t.key ? "bg-colony-navy text-colony-ice" : "text-colony-mist"}`}
           >
-            {it.label}
+            <NavIcon d={t.icon} />
+            {t.label}
           </button>
         ))}
-      </div>
-    </nav>
+      </nav>
+    </header>
   );
 }
 
@@ -224,12 +296,12 @@ function ContributionUnits({ alloc }: { alloc: Allocation }) {
   const ramU = alloc.ram_gb * UNIT_RAM;
   const gpuU = alloc.gpu_memory_gb * UNIT_GPU;
   return (
-    <div className="mt-4 rounded border border-colony-mist bg-colony-lightblue p-3">
+    <div className="mt-4 rounded border border-colony-navy bg-colony-black p-3">
       <div className="flex items-baseline justify-between">
-        <span className="text-sm font-medium text-colony-charcoal">Your compute units</span>
-        <span className="font-mono text-lg font-semibold text-colony-core">{total.toFixed(1)}</span>
+        <span className="text-sm font-medium text-colony-cloud">Your compute units</span>
+        <span className="font-mono text-lg font-semibold text-colony-ice">{total.toFixed(1)}</span>
       </div>
-      <p className="mt-1 text-xs text-colony-slate">
+      <p className="mt-1 text-xs text-colony-mist">
         CPU, memory, and GPU fold into one number, so it does not matter whether you lean CPU or GPU. Here that is{" "}
         {alloc.cpu_cores} cores ({cpuU.toFixed(1)}) + {alloc.ram_gb} GB RAM ({ramU.toFixed(1)}) + {alloc.gpu_memory_gb} GB GPU (
         {gpuU.toFixed(1)}). Every node adds its units to the same Zone pool.
@@ -243,28 +315,47 @@ function Overview({ state }: { state: State }) {
   const a = state.allocation;
   const s = state.specs;
   const hasGPU = s.gpu_memory_gb > 0;
+  const pct = (used: number, total: number) => (total > 0 ? (used / total) * 100 : null);
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <Card title="Node">
-          <Row label="Name" value={state.node_name} />
-          <Row label="Identity" value={state.node_id} mono />
-          <Row label="Connection" value={state.connection} />
-          <Row label="Zone" value={state.colony_id || "Not in a Zone"} mono={!!state.colony_id} />
-        </Card>
-        <Card title="Machine">
-          <Row label="System" value={s.os} />
-          <Row label="CPU" value={`${s.cpu_cores} cores`} />
-          <Row label="Memory" value={`${s.ram_gb} GB`} />
-          <Row label="GPU" value={s.gpu_model || "None detected"} />
-        </Card>
-      </div>
+      <section className="relative overflow-hidden rounded-xl border border-colony-midblue bg-gradient-to-br from-colony-navy via-colony-indigo to-colony-black p-5">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="truncate text-xl font-bold text-colony-cloud">{state.node_name}</h2>
+              <StatusPill state={state} reachable />
+            </div>
+            <p className="mt-1.5 text-xs text-colony-mist">
+              {s.os} · {s.cpu_cores} cores · {s.ram_gb} GB · {s.gpu_model || "no GPU"}
+            </p>
+            <p className="mt-1 text-xs text-colony-mist">
+              {state.colony_id ? (
+                <>
+                  In Zone <span className="font-mono text-colony-cloud">{state.colony_id.slice(0, 12)}</span>
+                  {state.colony_usage.active ? ", working on a request now" : ", idle"}
+                </>
+              ) : (
+                "Not in a Zone yet: its owner adds it to one in Zonn Console."
+              )}
+            </p>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <PauseButton state={state} />
+              <span className="text-xs text-colony-grayblue">Lending {computeUnits(a).toFixed(1)} compute units</span>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-2 sm:gap-4">
+            <Ring value={pct(u.cpu_used, s.cpu_cores)} label="CPU" detail={`${u.cpu_used.toFixed(1)} / ${s.cpu_cores}`} />
+            <Ring value={pct(u.ram_used_gb, s.ram_gb)} label="Memory" detail={`${u.ram_used_gb.toFixed(1)} / ${s.ram_gb} GB`} />
+            <Ring value={hasGPU ? pct(u.gpu_mem_used_gb, s.gpu_memory_gb) : null} label="GPU memory" detail={hasGPU ? `${u.gpu_mem_used_gb.toFixed(1)} / ${s.gpu_memory_gb} GB` : "no GPU"} />
+          </div>
+        </div>
+      </section>
 
       {/* Each resource is a conservation balance: in use + contributed + free
           always adds up to the machine total, so what the machine consumes and
           what is offered to the Zone can never together exceed what exists. */}
       <Card title="Resource balance">
-        <p className="text-sm text-colony-slate">
+        <p className="text-sm text-colony-mist">
           For every resource, what your machine is using, what you contribute to the Zone, and the free room left
           always add up to your total. You can never contribute more than is free.
         </p>
@@ -277,7 +368,7 @@ function Overview({ state }: { state: State }) {
           )}
         </div>
         {u.gpu_temp_c > 0 && (
-          <div className="mt-4 border-t border-colony-mist pt-3">
+          <div className="mt-4 border-t border-colony-navy pt-3">
             <Row label="GPU temperature" value={`${u.gpu_temp_c} C`} />
           </div>
         )}
@@ -305,14 +396,14 @@ function Downloads({ downloads }: { downloads: Download[] }) {
           const pct = d.total > 0 ? Math.min(100, Math.round((d.done / d.total) * 100)) : 0;
           return (
             <div key={d.model}>
-              <div className="flex justify-between text-sm text-colony-charcoal">
+              <div className="flex justify-between text-sm text-colony-cloud">
                 <span>{d.model}</span>
-                <span className="text-colony-slate">
+                <span className="text-colony-mist">
                   {sizeText(d.done)} of {sizeText(d.total)} ({pct}%)
                 </span>
               </div>
-              <div className="mt-1 h-1.5 w-full overflow-hidden rounded bg-colony-mist">
-                <div className="h-full bg-colony-core" style={{ width: `${pct}%` }} />
+              <div className="mt-1 h-1.5 w-full overflow-hidden rounded bg-colony-navy">
+                <div className="h-full bg-colony-ice" style={{ width: `${pct}%` }} />
               </div>
             </div>
           );
@@ -331,7 +422,7 @@ function ContributionUsage({ state }: { state: State }) {
   const a = state.allocation;
   return (
     <Card title="Zone use of your contribution">
-      <p className="text-sm text-colony-slate">
+      <p className="text-sm text-colony-mist">
         {cu.active
           ? "The Zone is running a task on your node. This is how much of what you pledged it is drawing right now."
           : "The Zone is not running anything on your node right now, so none of your pledge is in use. This moves when a task runs here."}
@@ -350,12 +441,12 @@ function UsageBar({ label, used, pledged, unit }: { label: string; used: number;
   return (
     <div className="text-sm">
       <div className="mb-1 flex items-baseline justify-between gap-3">
-        <span className="text-colony-slate">{label}</span>
-        <span className="font-mono text-xs text-colony-charcoal">
+        <span className="text-colony-mist">{label}</span>
+        <span className="font-mono text-xs text-colony-cloud">
           {used.toFixed(1)} of {pledged} {unit} in use, {free.toFixed(1)} free
         </span>
       </div>
-      <div className="h-2 w-full rounded bg-colony-mist">
+      <div className="h-2 w-full rounded bg-colony-navy">
         <div className="h-2 rounded bg-colony-vibrant" style={{ width: `${pct}%` }} />
       </div>
     </div>
@@ -364,10 +455,10 @@ function UsageBar({ label, used, pledged, unit }: { label: string; used: number;
 
 function BalanceLegend() {
   return (
-    <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-colony-slate">
-      <Swatch className="bg-colony-core" label="In use by your machine" />
+    <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-colony-mist">
+      <Swatch className="bg-colony-cloud" label="In use by your machine" />
       <Swatch className="bg-colony-ice" label="Contributed to the Zone" />
-      <Swatch className="bg-colony-mist" label="Free" />
+      <Swatch className="bg-colony-navy" label="Free" />
     </div>
   );
 }
@@ -409,21 +500,41 @@ function BalanceRow({
   return (
     <div className="text-sm">
       <div className="mb-1 flex items-baseline justify-between gap-3">
-        <span className="font-medium text-colony-charcoal">{label}</span>
-        <span className="font-mono text-xs text-colony-slate">
+        <span className="font-medium text-colony-cloud">{label}</span>
+        <span className="font-mono text-xs text-colony-mist">
           {fmt(used)} in use &middot; {contribution} contributed &middot; {fmt(free)} free &middot; {total} {unit}
         </span>
       </div>
-      <div className="flex h-3 w-full overflow-hidden rounded bg-colony-mist">
-        <div className="h-3 bg-colony-core" style={{ width: `${usedPct}%` }} />
+      <div className="flex h-3 w-full overflow-hidden rounded bg-colony-navy">
+        <div className="h-3 bg-colony-cloud" style={{ width: `${usedPct}%` }} />
         <div className="h-3 bg-colony-ice" style={{ width: `${contribPct}%` }} />
       </div>
       {over && (
-        <div className="mt-1 flex items-center gap-1.5 text-xs text-colony-slate">
+        <div className="mt-1 flex items-center gap-1.5 text-xs text-colony-mist">
           <WarnGlyph />
           Your machine is using more than the free room left after your pledge. Lower your contribution in Settings.
         </div>
       )}
+    </div>
+  );
+}
+
+// Ring is a circular gauge for one live share of the machine.
+function Ring({ value, label, detail }: { value: number | null; label: string; detail: string }) {
+  const r = 34;
+  const c = 2 * Math.PI * r;
+  const v = value == null ? 0 : Math.max(0, Math.min(100, value));
+  return (
+    <div className="flex flex-col items-center gap-1">
+      <svg viewBox="0 0 80 80" className="h-[72px] w-[72px] sm:h-[84px] sm:w-[84px]" role="img" aria-label={value == null ? `${label}: none` : `${label}: ${Math.round(v)}%`}>
+        <circle cx="40" cy="40" r={r} fill="none" stroke="#1A1720" strokeWidth="7" />
+        <circle cx="40" cy="40" r={r} fill="none" stroke="#F0D2A3" strokeWidth="7" strokeLinecap="round" strokeDasharray={`${(v / 100) * c} ${c}`} transform="rotate(-90 40 40)" style={{ transition: "stroke-dasharray 0.7s" }} />
+        <text x="40" y="45" textAnchor="middle" fill="#C6C5BF" fontSize="15" fontWeight="700">
+          {value == null ? "n/a" : `${Math.round(v)}%`}
+        </text>
+      </svg>
+      <span className="text-[11px] font-medium text-colony-cloud">{label}</span>
+      <span className="-mt-0.5 text-[10px] text-colony-grayblue">{detail}</span>
     </div>
   );
 }
@@ -460,24 +571,24 @@ function Analytics({ state, history }: { state: State; history: Sample[] }) {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        <StatCard label="Your rank" value={r.rank > 0 ? `#${r.rank}` : "--"} sub={`of ${r.active_nodes} active nodes`} accent="text-colony-core" />
-        <StatCard label="Compute units" value={r.contribution_score.toFixed(0)} sub={`Zone average ${r.average_score.toFixed(0)}`} accent="text-colony-deep" />
-        <StatCard label="Fleet nodes" value={String(r.active_nodes)} sub="online right now" accent="text-colony-core" />
+        <StatCard label="Your rank" value={r.rank > 0 ? `#${r.rank}` : "--"} sub={`of ${r.active_nodes} active nodes`} accent="text-colony-ice" />
+        <StatCard label="Compute units" value={r.contribution_score.toFixed(0)} sub={`Zone average ${r.average_score.toFixed(0)}`} accent="text-colony-vibrant" />
+        <StatCard label="Fleet nodes" value={String(r.active_nodes)} sub="online right now" accent="text-colony-cloud" />
         {hasGPU ? (
           <StatCard
             label="GPU temperature"
             value={u.gpu_temp_c > 0 ? `${Math.round(u.gpu_temp_c)} C` : "--"}
             sub={u.gpu_temp_c > 0 ? (tempWarn ? "Running hot" : "Normal") : "no reading"}
-            accent="text-colony-deep"
+            accent="text-colony-vibrant"
             warn={tempWarn}
           />
         ) : (
-          <StatCard label="GPU" value="None" sub="not detected" accent="text-colony-slate" />
+          <StatCard label="GPU" value="None" sub="not detected" accent="text-colony-mist" />
         )}
       </div>
 
       <Card title="Utilization over time">
-        <p className="text-sm text-colony-slate">
+        <p className="text-sm text-colony-mist">
           The share of your machine in use, sampled every two seconds. Peak so far: CPU {peakCpu}%, memory {peakRam}%.
         </p>
         <div className="mt-2">
@@ -499,13 +610,13 @@ function Analytics({ state, history }: { state: State; history: Sample[] }) {
           </Card>
         ) : (
           <Card title="GPU">
-            <p className="text-sm text-colony-slate">No GPU detected on this machine.</p>
+            <p className="text-sm text-colony-mist">No GPU detected on this machine.</p>
           </Card>
         )}
       </div>
 
       <Card title="Standing versus the Zone">
-        <p className="mb-3 text-sm text-colony-slate">{comparison}</p>
+        <p className="mb-3 text-sm text-colony-mist">{comparison}</p>
         <ScoreBar score={r.contribution_score} average={r.average_score} />
       </Card>
     </div>
@@ -525,24 +636,25 @@ function StatCard({
   accent: string;
   warn?: boolean;
 }) {
+  const strong = accent === "text-colony-ice";
   return (
-    <section className="rounded-md border border-colony-mist bg-colony-nearwhite p-4">
-      <div className="text-xs font-semibold uppercase tracking-wide text-colony-slate">{label}</div>
-      <div className={`mt-1 flex items-center gap-2 text-3xl font-semibold ${accent}`}>
+    <section className={`min-w-0 rounded-xl border p-4 ${strong ? "border-colony-midblue bg-gradient-to-br from-colony-navy to-colony-indigo" : "border-colony-navy bg-colony-indigo"}`}>
+      <div className="text-[11px] uppercase tracking-[0.14em] text-colony-mist">{label}</div>
+      <div className={`mt-2 flex items-center gap-2 text-2xl font-bold tracking-tight sm:text-3xl ${strong ? "text-colony-ice" : "text-colony-cloud"}`}>
         <span>{value}</span>
         {warn && <WarnGlyph />}
       </div>
-      <div className="mt-1 text-xs text-colony-slate">{sub}</div>
+      <div className="mt-1 text-xs text-colony-grayblue">{sub}</div>
     </section>
   );
 }
 
 function ChartLegend({ hasGPU }: { hasGPU: boolean }) {
   return (
-    <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-colony-slate">
-      <Swatch className="bg-colony-core" label="CPU" />
+    <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-colony-mist">
+      <Swatch className="bg-colony-cloud" label="CPU" />
       <Swatch className="bg-colony-ice" label="Memory" />
-      {hasGPU && <Swatch className="bg-colony-vibrant" label="GPU memory" />}
+      {hasGPU && <Swatch className="bg-colony-warmbeige" label="GPU memory" />}
     </div>
   );
 }
@@ -550,7 +662,7 @@ function ChartLegend({ hasGPU }: { hasGPU: boolean }) {
 function UtilizationChart({ history, hasGPU }: { history: Sample[]; hasGPU: boolean }) {
   if (history.length < 2) {
     return (
-      <div className="flex h-[220px] items-center justify-center text-sm text-colony-slate">
+      <div className="flex h-[220px] items-center justify-center text-sm text-colony-mist">
         Collecting live samples...
       </div>
     );
@@ -560,30 +672,30 @@ function UtilizationChart({ history, hasGPU }: { history: Sample[]; hasGPU: bool
       <AreaChart data={history} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
         <defs>
           <linearGradient id="gCpu" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#544943" stopOpacity={0.5} />
-            <stop offset="100%" stopColor="#544943" stopOpacity={0.04} />
+            <stop offset="0%" stopColor="#C6C5BF" stopOpacity={0.5} />
+            <stop offset="100%" stopColor="#C6C5BF" stopOpacity={0.04} />
           </linearGradient>
           <linearGradient id="gRam" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="#F0D2A3" stopOpacity={0.5} />
             <stop offset="100%" stopColor="#F0D2A3" stopOpacity={0.04} />
           </linearGradient>
           <linearGradient id="gGpu" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#EAD0A7" stopOpacity={0.5} />
-            <stop offset="100%" stopColor="#EAD0A7" stopOpacity={0.04} />
+            <stop offset="0%" stopColor="#D7CAB4" stopOpacity={0.5} />
+            <stop offset="100%" stopColor="#D7CAB4" stopOpacity={0.04} />
           </linearGradient>
         </defs>
-        <CartesianGrid stroke="#878782" strokeDasharray="3 3" vertical={false} />
-        <XAxis dataKey="time" tick={{ fontSize: 10, fill: "#48464B" }} interval="preserveStartEnd" minTickGap={44} />
-        <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: "#48464B" }} tickFormatter={(v) => `${v}%`} width={40} />
+        <CartesianGrid stroke="#2F2A2D" strokeDasharray="3 3" vertical={false} />
+        <XAxis dataKey="time" tick={{ fontSize: 10, fill: "#878782" }} interval="preserveStartEnd" minTickGap={44} />
+        <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: "#878782" }} tickFormatter={(v) => `${v}%`} width={40} />
         <Tooltip
-          contentStyle={{ background: "#CAC6BC", border: "1px solid #878782", borderRadius: 6, fontSize: 12 }}
-          labelStyle={{ color: "#48464B" }}
+          contentStyle={{ background: "#0F0E12", border: "1px solid #2F2A2D", color: "#C6C5BF", borderRadius: 6, fontSize: 12 }}
+          labelStyle={{ color: "#878782" }}
           formatter={(v: number, n: string) => [`${v}%`, n]}
         />
-        <Area type="monotone" dataKey="cpu" name="CPU" stroke="#544943" strokeWidth={2} fill="url(#gCpu)" isAnimationActive={false} />
+        <Area type="monotone" dataKey="cpu" name="CPU" stroke="#C6C5BF" strokeWidth={2} fill="url(#gCpu)" isAnimationActive={false} />
         <Area type="monotone" dataKey="ram" name="Memory" stroke="#F0D2A3" strokeWidth={2} fill="url(#gRam)" isAnimationActive={false} />
         {hasGPU && (
-          <Area type="monotone" dataKey="gpu" name="GPU memory" stroke="#EAD0A7" strokeWidth={2} fill="url(#gGpu)" isAnimationActive={false} />
+          <Area type="monotone" dataKey="gpu" name="GPU memory" stroke="#D7CAB4" strokeWidth={2} fill="url(#gGpu)" isAnimationActive={false} />
         )}
       </AreaChart>
     </ResponsiveContainer>
@@ -591,22 +703,9 @@ function UtilizationChart({ history, hasGPU }: { history: Sample[]; hasGPU: bool
 }
 
 function Gauge({ used, total, unit }: { used: number; total: number; unit: string }) {
-  const pct = total > 0 ? Math.min(100, Math.round((used / total) * 100)) : 0;
-  const data = [{ name: unit, value: pct, fill: "#544943" }];
   return (
-    <div className="relative">
-      <ResponsiveContainer width="100%" height={150}>
-        <RadialBarChart innerRadius="72%" outerRadius="100%" data={data} startAngle={220} endAngle={-40}>
-          <PolarAngleAxis type="number" domain={[0, 100]} angleAxisId={0} tick={false} />
-          <RadialBar background={{ fill: "#878782" }} dataKey="value" cornerRadius={8} angleAxisId={0} />
-        </RadialBarChart>
-      </ResponsiveContainer>
-      <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-2xl font-semibold text-colony-charcoal">{pct}%</span>
-        <span className="font-mono text-xs text-colony-slate">
-          {used.toFixed(1)} / {total} {unit}
-        </span>
-      </div>
+    <div className="flex justify-center py-2">
+      <Ring value={total > 0 ? (used / total) * 100 : null} label={`${used.toFixed(1)} of ${total} ${unit}`} detail="of the whole machine" />
     </div>
   );
 }
@@ -615,7 +714,7 @@ function ScoreBar({ score, average }: { score: number; average: number }) {
   const max = Math.max(score, average, 1);
   return (
     <div className="space-y-3 pt-2">
-      <LabeledBar label="You" value={score} max={max} color="bg-colony-core" />
+      <LabeledBar label="You" value={score} max={max} color="bg-colony-ice" />
       <LabeledBar label="Average" value={average} max={max} color="bg-colony-grayblue" />
     </div>
   );
@@ -626,10 +725,10 @@ function LabeledBar({ label, value, max, color }: { label: string; value: number
   return (
     <div className="text-sm">
       <div className="mb-1 flex justify-between">
-        <span className="text-colony-slate">{label}</span>
-        <span className="font-mono text-xs text-colony-charcoal">{value.toFixed(0)}</span>
+        <span className="text-colony-mist">{label}</span>
+        <span className="font-mono text-xs text-colony-cloud">{value.toFixed(0)}</span>
       </div>
-      <div className="h-2 w-full rounded bg-colony-mist">
+      <div className="h-2 w-full rounded bg-colony-navy">
         <div className={`h-2 rounded ${color}`} style={{ width: `${pct}%` }} />
       </div>
     </div>
@@ -743,10 +842,10 @@ function Settings({ state }: { state: State }) {
       <Card title="Availability">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <div className="text-sm font-medium text-colony-charcoal">
+            <div className="text-sm font-medium text-colony-cloud">
               {cfg.available ? "This machine is available to the Zone" : "This machine is paused"}
             </div>
-            <p className="mt-1 max-w-md text-sm text-colony-slate">
+            <p className="mt-1 max-w-md text-sm text-colony-mist">
               {cfg.available
                 ? "The node is registered and contributing the resources you set below. Turn this off to stop contributing without quitting the app."
                 : "The node has stopped contributing and shows as offline to the Zone. Turn this on to make yourself available again."}
@@ -759,20 +858,20 @@ function Settings({ state }: { state: State }) {
       <Card title="Only when idle">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <div className="text-sm font-medium text-colony-charcoal">
+            <div className="text-sm font-medium text-colony-cloud">
               {cfg.only_when_idle ? `Contributing only after you have been away for ${cfg.idle_minutes} minutes` : "Contributing whenever this machine is available"}
             </div>
-            <p className="mt-1 max-w-md text-sm text-colony-slate">
+            <p className="mt-1 max-w-md text-sm text-colony-mist">
               When on, this machine contributes only while nobody is using its keyboard or mouse, and stops as soon as
               you come back. A Zone using it moves its work to its other machines.
             </p>
             {cfg.only_when_idle && (
-              <label className="mt-2 flex items-center gap-2 text-sm text-colony-slate">
+              <label className="mt-2 flex items-center gap-2 text-sm text-colony-mist">
                 Away for at least
                 <select
                   value={cfg.idle_minutes}
                   onChange={(e) => applyNow({ ...cfg, idle_minutes: Number(e.target.value) })}
-                  className="rounded border border-colony-mist bg-colony-cloud px-2 py-1 text-sm text-colony-charcoal outline-none focus:border-colony-core"
+                  className="rounded border border-colony-navy bg-colony-black px-2 py-1 text-sm text-colony-cloud outline-none focus:border-colony-midblue"
                 >
                   {[1, 2, 5, 10, 15, 30, 60].map((m) => (
                     <option key={m} value={m}>
@@ -796,10 +895,10 @@ function Settings({ state }: { state: State }) {
         <Card title="Start when you sign in">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <div className="text-sm font-medium text-colony-charcoal">
+              <div className="text-sm font-medium text-colony-cloud">
                 {cfg.auto_start ? "Zonn Node starts in the background when you sign in" : "Zonn Node starts only when you open it"}
               </div>
-              <p className="mt-1 max-w-md text-sm text-colony-slate">
+              <p className="mt-1 max-w-md text-sm text-colony-mist">
                 Closing the window keeps Zonn Node running; open it again from the tray icon (on macOS, from the Dock and
                 the Zonn Node menu). Quit it from there to stop contributing.
               </p>
@@ -819,10 +918,10 @@ function Settings({ state }: { state: State }) {
       <Card title="Community sharing">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <div className="text-sm font-medium text-colony-charcoal">
+            <div className="text-sm font-medium text-colony-cloud">
               {cfg.share_community ? "Shared with the community pool" : "Only your own Zones use this machine"}
             </div>
-            <p className="mt-1 max-w-md text-sm text-colony-slate">
+            <p className="mt-1 max-w-md text-sm text-colony-mist">
               When on, Zonn may also include this machine in community Zones that serve other people, once it has been online
               long enough. It then holds middle layers and receives only hidden states (the numbers passed between layers),
               not the prompts and answers themselves: the first and last stages run on machines Zonn operates. Now and then a trusted machine
@@ -830,8 +929,10 @@ function Settings({ state }: { state: State }) {
               the machine out of any community Zone at once.
             </p>
             {state.community?.status && (
-              <p className="mt-2 max-w-md text-sm text-colony-charcoal">
-                <span className="mr-2 font-semibold" aria-hidden>{state.community.eligible ? "✓" : "…"}</span>
+              <p className="mt-2 max-w-md text-sm text-colony-cloud">
+                <span className={`mr-2 inline-block rounded border px-1.5 text-[10px] font-semibold uppercase tracking-wide ${state.community.eligible ? "border-colony-midblue text-colony-ice" : "border-colony-deep text-colony-mist"}`}>
+                  {state.community.eligible ? "Eligible" : "Status"}
+                </span>
                 {state.community.status}
               </p>
             )}
@@ -843,10 +944,10 @@ function Settings({ state }: { state: State }) {
       <Card title="Crash reports">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <div className="text-sm font-medium text-colony-charcoal">
+            <div className="text-sm font-medium text-colony-cloud">
               {cfg.crash_reports_enabled ? "Anonymized crash reports are on" : "Crash reports are off"}
             </div>
-            <p className="mt-1 max-w-md text-sm text-colony-slate">
+            <p className="mt-1 max-w-md text-sm text-colony-mist">
               If the node recovers from a crash, it sends the error type, a stack trace, and your operating system to
               the Coordinator so it shows up in Zonn Console. Never your hostname, username, IP address, or files.
             </p>
@@ -865,7 +966,7 @@ function Settings({ state }: { state: State }) {
                 setCfg({ ...cfg, node_name: e.target.value });
                 setSaved(false);
               }}
-              className="w-full rounded border border-colony-mist bg-colony-cloud px-3 py-2 text-sm text-colony-charcoal outline-none focus:border-colony-core"
+              className="w-full rounded border border-colony-navy bg-colony-black px-3 py-2 text-sm text-colony-cloud outline-none focus:border-colony-midblue"
             />
           </Field>
           <Field label="Coordinator address">
@@ -877,14 +978,14 @@ function Settings({ state }: { state: State }) {
                 setCfg({ ...cfg, coordinator_url: e.target.value });
                 setSaved(false);
               }}
-              className="w-full rounded border border-colony-mist bg-colony-cloud px-3 py-2 font-mono text-sm text-colony-charcoal outline-none focus:border-colony-core"
+              className="w-full rounded border border-colony-navy bg-colony-black px-3 py-2 font-mono text-sm text-colony-cloud outline-none focus:border-colony-midblue"
             />
           </Field>
           <div className="pt-1">
             <Row label="Node identity" value={state.enrolled ? cfg.node_id : "Not enrolled yet"} mono />
             <Row label="App version" value={state.app_version} mono />
           </div>
-          <p className="text-xs text-colony-slate">
+          <p className="text-xs text-colony-mist">
             Changing the Coordinator address means enrolling this machine again for the new Coordinator; its
             credential is only ever sent to the Coordinator that issued it.
           </p>
@@ -902,7 +1003,7 @@ function Settings({ state }: { state: State }) {
       </div>
 
       <Card title="What you contribute">
-        <p className="mb-3 text-sm text-colony-slate">
+        <p className="mb-3 text-sm text-colony-mist">
           Each slider stops at what is free right now, your total minus what your machine is already using, so your
           contribution and your own usage always stay in balance. Zero means you contribute none of that resource.
         </p>
@@ -938,12 +1039,12 @@ function Settings({ state }: { state: State }) {
           <button
             onClick={save}
             disabled={saving}
-            className="rounded bg-colony-core px-4 py-2 text-sm font-medium text-colony-cloud hover:bg-colony-deep disabled:opacity-60"
+            className="rounded bg-colony-ice px-4 py-2 text-sm font-medium text-colony-black hover:bg-colony-vibrant disabled:opacity-60"
           >
             {saving ? "Saving..." : "Save settings"}
           </button>
-          {saved && <span className="text-sm text-colony-slate">Saved and applied.</span>}
-          {error && <span className="text-sm text-colony-slate">{error}</span>}
+          {saved && <span className="text-sm text-colony-mist">Saved and applied.</span>}
+          {error && <span className="text-sm text-colony-mist">{error}</span>}
         </div>
       </Card>
     </div>
@@ -978,26 +1079,26 @@ function ModelCache({ state, cfg, apply }: { state: State; cfg: Config; apply: (
           type="button"
           onClick={clear}
           disabled={clearing || !cache.models?.some((m) => !m.in_use)}
-          className="rounded border border-colony-core px-2 py-1 text-xs text-colony-core hover:bg-colony-core hover:text-colony-cloud disabled:opacity-50"
+          className="rounded border border-colony-midblue px-2 py-1 text-xs text-colony-ice hover:bg-colony-ice hover:text-colony-black disabled:opacity-50"
         >
           {clearing ? "Clearing" : "Clear cache"}
         </button>
       }
     >
-      <p className="text-sm text-colony-slate">
+      <p className="text-sm text-colony-mist">
         Model weights this machine downloaded for Zones, kept so the next run loads without downloading again. Past the
         limit, the models used least recently are removed; a model a Zone is using here is never removed.
       </p>
-      <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-colony-charcoal">
+      <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-colony-cloud">
         <span>
           {sizeText(cache.bytes)} used{capBytes > 0 ? ` of ${cfg.model_cache_gb} GB (${pct}%)` : ", no limit"}
         </span>
-        <label className="flex items-center gap-2 text-colony-slate">
+        <label className="flex items-center gap-2 text-colony-mist">
           Limit
           <select
             value={cfg.model_cache_gb}
             onChange={(e) => apply({ ...cfg, model_cache_gb: Number(e.target.value) })}
-            className="rounded border border-colony-mist bg-colony-cloud px-2 py-1 text-sm text-colony-charcoal outline-none focus:border-colony-core"
+            className="rounded border border-colony-navy bg-colony-black px-2 py-1 text-sm text-colony-cloud outline-none focus:border-colony-midblue"
           >
             {[...new Set([1, 2, 5, 10, 20, 50, 100, cfg.model_cache_gb])]
               .filter((g) => g > 0)
@@ -1012,29 +1113,29 @@ function ModelCache({ state, cfg, apply }: { state: State; cfg: Config; apply: (
         </label>
       </div>
       {capBytes > 0 && (
-        <div className="mt-2 h-1.5 w-full overflow-hidden rounded bg-colony-mist">
-          <div className="h-full bg-colony-core" style={{ width: `${pct}%` }} />
+        <div className="mt-2 h-1.5 w-full overflow-hidden rounded bg-colony-navy">
+          <div className="h-full bg-colony-ice" style={{ width: `${pct}%` }} />
         </div>
       )}
       {cache.models?.length > 0 ? (
         <ul className="mt-3 space-y-1 text-sm">
           {[...cache.models].reverse().map((m) => (
             <li key={m.name} className="flex justify-between gap-3">
-              <span className="text-colony-charcoal">
+              <span className="text-colony-cloud">
                 {m.name}
-                {m.in_use && <span className="ml-2 text-xs font-medium text-colony-core">In use</span>}
+                {m.in_use && <span className="ml-2 text-xs font-medium text-colony-ice">In use</span>}
               </span>
-              <span className="shrink-0 text-colony-slate">
+              <span className="shrink-0 text-colony-mist">
                 {sizeText(m.bytes)}, used {new Date(m.last_used).toLocaleString()}
               </span>
             </li>
           ))}
         </ul>
       ) : (
-        <p className="mt-3 text-sm text-colony-slate">No models downloaded yet.</p>
+        <p className="mt-3 text-sm text-colony-mist">No models downloaded yet.</p>
       )}
-      <p className="mt-2 font-mono text-xs text-colony-slate">{cache.dir}</p>
-      {error && <p className="mt-2 text-sm text-colony-indigo">{error}</p>}
+      <p className="mt-2 font-mono text-xs text-colony-mist">{cache.dir}</p>
+      {error && <p className="mt-2 text-sm text-colony-warmbeige">{error}</p>}
     </Card>
   );
 }
@@ -1049,11 +1150,11 @@ function Toggle({ on, busy, onChange, label }: { on: boolean; busy: boolean; onC
       disabled={busy}
       onClick={onChange}
       className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors disabled:opacity-60 ${
-        on ? "bg-colony-core" : "bg-colony-mist"
+        on ? "bg-colony-ice" : "border border-colony-deep bg-colony-black"
       }`}
     >
       <span
-        className={`inline-block h-5 w-5 transform rounded-full bg-colony-cloud transition-transform ${
+        className={`inline-block h-5 w-5 transform rounded-full transition-transform ${on ? "bg-colony-black" : "bg-colony-grayblue"} ${
           on ? "translate-x-6" : "translate-x-1"
         }`}
       />
@@ -1064,7 +1165,7 @@ function Toggle({ on, busy, onChange, label }: { on: boolean; busy: boolean; onC
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block text-sm">
-      <span className="mb-1 block text-colony-slate">{label}</span>
+      <span className="mb-1 block text-colony-mist">{label}</span>
       {children}
     </label>
   );
@@ -1087,18 +1188,18 @@ function Activity({ state }: { state: State }) {
     <Card
       title="Activity"
       action={
-        <button onClick={copy} className="rounded border border-colony-mist px-2 py-1 text-xs text-colony-slate hover:text-colony-charcoal">
+        <button onClick={copy} className="rounded border border-colony-navy px-2 py-1 text-xs text-colony-mist hover:text-colony-cloud">
           {copied ? "Copied" : "Copy log"}
         </button>
       }
     >
       <div className="max-h-[28rem] overflow-y-auto font-mono text-xs">
-        {state.events.length === 0 && <div className="text-colony-slate">No activity yet.</div>}
+        {state.events.length === 0 && <div className="text-colony-mist">No activity yet.</div>}
         {state.events.map((e, i) => (
-          <div key={i} className="flex gap-3 border-b border-colony-mist py-1.5 last:border-0">
-            <span className="shrink-0 text-colony-slate">{new Date(e.time).toLocaleTimeString()}</span>
+          <div key={i} className="flex gap-3 border-b border-colony-navy py-1.5 last:border-0">
+            <span className="shrink-0 text-colony-mist">{new Date(e.time).toLocaleTimeString()}</span>
             <LevelTag level={e.level} />
-            <span className="text-colony-charcoal">{e.message}</span>
+            <span className="text-colony-cloud">{e.message}</span>
           </div>
         ))}
       </div>
@@ -1108,19 +1209,19 @@ function Activity({ state }: { state: State }) {
 
 function LevelTag({ level }: { level: string }) {
   const map: Record<string, string> = {
-    INFO: "bg-colony-softblue text-colony-deep",
-    WARN: "bg-colony-warmbeige text-colony-navy",
-    ERROR: "bg-colony-indigo text-colony-cloud",
+    INFO: "border border-colony-deep text-colony-grayblue",
+    WARN: "border border-colony-midblue text-colony-warmbeige",
+    ERROR: "bg-colony-warmbeige text-colony-black",
   };
-  const cls = map[level] ?? "bg-colony-mist text-colony-navy";
+  const cls = map[level] ?? "bg-colony-deep text-colony-grayblue";
   return <span className={`shrink-0 rounded px-1.5 ${cls}`}>{level}</span>;
 }
 
 function Card({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <section className="rounded-md border border-colony-mist bg-colony-nearwhite p-5">
-      <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-colony-slate">{title}</h2>
+    <section className="min-w-0 rounded-xl border border-colony-navy bg-colony-indigo p-4 sm:p-5">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h2 className="text-sm font-semibold text-colony-cloud">{title}</h2>
         {action}
       </div>
       <div className="space-y-2">{children}</div>
@@ -1131,8 +1232,8 @@ function Card({ title, action, children }: { title: string; action?: React.React
 function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="flex items-center justify-between gap-4 text-sm">
-      <span className="text-colony-slate">{label}</span>
-      <span className={`text-right text-colony-charcoal ${mono ? "font-mono text-xs" : ""}`}>{value}</span>
+      <span className="text-colony-mist">{label}</span>
+      <span className={`text-right text-colony-cloud ${mono ? "font-mono text-xs" : ""}`}>{value}</span>
     </div>
   );
 }
@@ -1156,11 +1257,11 @@ function Slider({
   return (
     <div className="text-sm">
       <div className="mb-1 flex items-baseline justify-between gap-3">
-        <span className="text-colony-slate">
+        <span className="text-colony-mist">
           {label}
-          {note && <span className="ml-2 text-xs text-colony-slate">({note})</span>}
+          {note && <span className="ml-2 text-xs text-colony-mist">({note})</span>}
         </span>
-        <span className="font-mono text-xs text-colony-charcoal">
+        <span className="font-mono text-xs text-colony-cloud">
           {value} / {safeMax} {unit}
         </span>
       </div>
@@ -1203,11 +1304,11 @@ function EnrollPanel({ state }: { state: State }) {
   };
 
   const field =
-    "w-full rounded border border-colony-mist bg-colony-cloud px-3 py-2 font-mono text-sm text-colony-charcoal outline-none focus:border-colony-core";
+    "w-full rounded border border-colony-navy bg-colony-black px-3 py-2 font-mono text-sm text-colony-cloud outline-none focus:border-colony-midblue";
   return (
     <div className="mb-6">
       <Card title="Enroll this machine">
-        <p className="text-sm text-colony-slate">
+        <p className="text-sm text-colony-mist">
           Before this machine can join a Zone, connect it to your Zonn account. In Zonn Console, open Nodes, choose
           Add a machine, and paste the code here. Codes work once and expire after an hour.
         </p>
@@ -1224,11 +1325,11 @@ function EnrollPanel({ state }: { state: State }) {
               onChange={(e) => setCode(e.target.value)}
             />
           </Field>
-          {error && <p className="text-sm text-colony-indigo">{error}</p>}
+          {error && <p className="text-sm text-colony-warmbeige">{error}</p>}
           <button
             type="submit"
             disabled={busy || !code.trim()}
-            className="rounded bg-colony-core px-4 py-2 text-sm font-medium text-colony-cloud hover:bg-colony-deep disabled:opacity-60"
+            className="rounded bg-colony-ice px-4 py-2 text-sm font-medium text-colony-black hover:bg-colony-vibrant disabled:opacity-60"
           >
             {busy ? "Enrolling..." : "Enroll this machine"}
           </button>
@@ -1253,34 +1354,34 @@ function UpdatePanel({ update }: { update: UpdateState }) {
   };
   const pct = update.size > 0 ? Math.min(100, Math.round((update.done / update.size) * 100)) : 0;
   return (
-    <div className="mb-4 rounded-md border border-colony-mist bg-colony-paleblue px-4 py-3 text-sm text-colony-midnight">
+    <div className="mb-4 rounded-md border border-colony-navy bg-colony-navy px-4 py-3 text-sm text-colony-cloud">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="font-medium">
             Zonn Node {update.version} is available{update.required ? ", and this Zone requires it" : ""}
           </div>
-          <div className="mt-0.5 text-xs text-colony-slate">
+          <div className="mt-0.5 text-xs text-colony-mist">
             {update.status === "downloading"
               ? `Downloading: ${mb(update.done)} of ${mb(update.size)} MB (${pct}%)`
               : update.status === "opened"
                 ? "Checked against its SHA-256 and opened. Finish the installer, then open Zonn Node again."
                 : `${mb(update.size)} MB, downloaded from your Zone's backend and checked against its SHA-256 before it opens.`}
           </div>
-          {(update.error || error) && <div className="mt-1 text-xs text-colony-indigo">{update.error || error}</div>}
+          {(update.error || error) && <div className="mt-1 text-xs text-colony-warmbeige">{update.error || error}</div>}
         </div>
         {update.status !== "downloading" && update.status !== "opened" && (
           <button
             type="button"
             onClick={install}
-            className="rounded bg-colony-core px-3 py-1.5 text-sm font-medium text-colony-cloud hover:bg-colony-deep"
+            className="rounded bg-colony-ice px-3 py-1.5 text-sm font-medium text-colony-black hover:bg-colony-vibrant"
           >
             {update.status === "error" ? "Try again" : "Download and install"}
           </button>
         )}
       </div>
       {update.status === "downloading" && (
-        <div className="mt-2 h-1.5 w-full overflow-hidden rounded bg-colony-mist">
-          <div className="h-full bg-colony-core" style={{ width: `${pct}%` }} />
+        <div className="mt-2 h-1.5 w-full overflow-hidden rounded bg-colony-navy">
+          <div className="h-full bg-colony-ice" style={{ width: `${pct}%` }} />
         </div>
       )}
     </div>
@@ -1289,8 +1390,12 @@ function UpdatePanel({ update }: { update: UpdateState }) {
 
 function Banner({ text }: { text: string }) {
   return (
-    <div className="rounded-md border border-colony-mist bg-colony-paleblue px-4 py-3 text-sm text-colony-midnight">
-      {text}
+    <div role="status" className="flex items-start gap-3 rounded-xl border border-colony-midblue bg-colony-navy px-4 py-3 text-sm text-colony-warmbeige">
+      <svg viewBox="0 0 24 24" className="mt-0.5 h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+        <path d="M12 8v5M12 16.5v.5" />
+        <circle cx="12" cy="12" r="9" />
+      </svg>
+      <span>{text}</span>
     </div>
   );
 }
