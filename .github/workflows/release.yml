@@ -6,7 +6,8 @@ name: Release
 #
 #   Windows   Zonn-Node-Setup-Windows-x64.exe, and -NVIDIA.exe with CUDA
 #   Linux     zonn-node_VERSION_amd64.deb, and zonn-node-nvidia with CUDA
-#   macOS     Zonn-Node-VERSION-macOS-apple-silicon.dmg and -intel.dmg
+#   macOS     Zonn-Node-VERSION-macOS-apple-silicon.dmg (Intel Macs are not
+#             built: the inference runner needs a newer PyTorch than they get)
 #
 # Installers are uploaded as workflow artifacts for checking on clean
 # machines. The last job collects all of them into one artifact,
@@ -46,7 +47,6 @@ jobs:
           - { os: ubuntu-22.04, label: linux-x64, platform: linux/amd64, variant: nvidia }
           - { os: windows-latest, label: windows-x64, platform: windows/amd64, variant: cpu }
           - { os: windows-latest, label: windows-x64, platform: windows/amd64, variant: nvidia }
-          - { os: macos-15-intel, label: macos-intel, platform: darwin/amd64, variant: cpu, dmg: intel }
           - { os: macos-15, label: macos-apple-silicon, platform: darwin/arm64, variant: cpu, dmg: apple-silicon }
     runs-on: ${{ matrix.os }}
     env:
@@ -70,6 +70,13 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+
+      - name: Free disk space for the CUDA build
+        if: runner.os == 'Linux' && matrix.variant == 'nvidia'
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo docker image prune --all --force >/dev/null || true
+          df -h /
 
       - name: Validate the version
         shell: bash
